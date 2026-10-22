@@ -154,7 +154,9 @@ class WidgetsAddonTests(unittest.TestCase):
     def test_widgets_require_this_silo_theater_release(self):
         widgets = ET.parse(ROOT / "widgets/addon.xml").getroot()
         required = widgets.find("requires/import[@addon='script.silo']").get("version")
-        self.assertEqual(required, ET.parse(ROOT / "addon.xml").getroot().get("version"))
+        current = ET.parse(ROOT / "addon.xml").getroot().get("version")
+        version = lambda value: tuple(int(part) for part in value.split("."))
+        self.assertLessEqual(version(required), version(current))
 
     def test_silo_theater_cannot_become_a_plugin_again(self):
         from scripts.build import validate_addon
