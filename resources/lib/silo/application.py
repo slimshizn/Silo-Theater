@@ -11,7 +11,9 @@ import xbmcvfs
 
 from .api import ApiError, SiloClient
 from .auth import AuthController, DeviceAuthCancelled, DeviceAuthExpired
+from .media import available_versions, default_version, format_time, is_multipart, resume_position, version_label, version_name
 from .playback import PlaybackController
+from .settings import read_options
 from .storage import SessionStore, StorageError
 from .ui import DetailsWindow, HomeWindow
 
@@ -44,25 +46,26 @@ class Application:
             self.store = SessionStore(os.path.join(
                 xbmcvfs.translatePath(self.addon.getAddonInfo("profile")), "session.json"))
         server_url = self.addon.getSetting("server_url").strip()
-        if not server_url:
-            self.dialog.ok("Welcome to Silo", "Enter your Silo server address in the add-on settings to begin.")
-            self.addon.openSettings()
-            server_url = self.addon.getSetting("server_url").strip()
-        if not server_url:
-            return
-        self.client = SiloClient(server_url, self.store)
-        self.server_name = urlsplit(server_url).hostname or "Silo"
-        self.client.server_info()
+        self.client = None
+        self._login_message = ""
+        if server_url:
+            try:
+                self._connect(server_url)
+            except ValueError as exc:
+                self._login_message = str(exc)
         signed_in = False
-        if self.store.get("access_token"):
+        if self.client is not None and (self.store.get("access_token") or self.store.get("refresh_token")):
             try:
                 self.client.me()
                 signed_in = True
             except ApiError as exc:
-                if exc.status != 401:
+                revoked = exc.status == 403 and not (
+                    self.store.get("access_token") or self.store.get("refresh_token"))
+                if exc.status != 401 and not revoked:
                     raise
         if not signed_in and not self.sign_in():
             return
+        server_url = self.client.server_url
         if not self.choose_profile():
             return
 
@@ -74,7 +77,7 @@ class Application:
             action = window.result
             del window
             if action == "profile":
-                if not self.choose_profile():
+                if not self.choose_profile(force=True):
                     return
             elif action == "settings":
                 self.addon.openSettings()
@@ -89,32 +92,34 @@ class Application:
                     pass
                 if not self.sign_in() or not self.choose_profile():
                     return
+                server_url = self.client.server_url
             else:
                 return
 
+    def _connect(self, server_url):
+        self.client = SiloClient(server_url, self.store)
+        self.server_name = urlsplit(self.client.server_url).hostname or "Silo"
+
     def sign_in(self):
+        if self.client is None:
+            return self.password_sign_in(message=getattr(self, "_login_message", ""))
         auth = AuthController(self.client)
-        methods = auth.available_methods()
+        try:
+            methods = auth.available_methods()
+        except ApiError as exc:
+            # Keep the address editable when an old server address is offline.
+            return self.password_sign_in(message=exc.message)
         if not methods:
             self.dialog.ok("Silo sign-in", "This server currently offers no supported TV sign-in method.")
             return False
         saved = self.store.get("auth_method")
-        preferred = saved or ("device" if self.addon.getSetting("sign_in_method") == "code" else "password")
-        if saved in methods:
-            method = saved
-        elif len(methods) == 1:
-            method = methods[0]
-        else:
-            selected = self.dialog.select("Sign in to Silo", [
-                "Sign in with a code" if value == "device" else "Username and password" for value in methods
-            ], preselect=methods.index(preferred) if preferred in methods else 0)
-            if selected < 0:
-                return False
-            method = methods[selected]
+        configured = self.addon.getSetting("sign_in_method")
+        preferred = "device" if configured == "code" else "password" if configured == "password" else saved or "password"
+        method = preferred if preferred in methods else "password" if "password" in methods else methods[0]
         while not self.monitor.abortRequested():
             try:
                 if method == "password":
-                    return self.password_sign_in()
+                    return self.password_sign_in(methods=methods)
                 if self.device_sign_in(auth):
                     self.addon.setSetting("sign_in_method", "code")
                     return True
@@ -133,18 +138,54 @@ class Application:
                 method = retry_methods[selected]
         return False
 
-    def password_sign_in(self):
-        username = self.dialog.input("Silo username", type=xbmcgui.INPUT_ALPHANUM)
-        if not username:
-            return False
-        password = self.dialog.input("Silo password", type=xbmcgui.INPUT_ALPHANUM,
-                                     option=xbmcgui.ALPHANUM_HIDE_INPUT)
-        if not password:
-            return False
-        self.client.login(username, password)
-        self.store.set("auth_method", "password")
-        self.addon.setSetting("sign_in_method", "password")
-        return True
+    def password_sign_in(self, methods=None, message=""):
+        from .login import prompt_login
+
+        server_url = self.client.server_url if self.client is not None else self.addon.getSetting("server_url").strip()
+        username = self.store.get("login_username", "") if self.store.get("login_username_server") == server_url else ""
+        known_server = self.client.server_url if self.client is not None and methods is not None else None
+        while not self.monitor.abortRequested():
+            credentials = prompt_login(self.addon, server_url=server_url, username=username,
+                                       allow_code=methods is None or "device" in methods, message=message)
+            if credentials is None:
+                return False
+            server_url = credentials["server_url"]
+            username = credentials.get("username", "")
+            password = credentials.pop("password", "")
+            try:
+                if self.client is None or self.client.server_url != server_url:
+                    self._connect(server_url)
+                server_url = self.client.server_url
+                auth = AuthController(self.client)
+                if known_server != server_url:
+                    methods = auth.available_methods()
+                    known_server = server_url
+                if credentials["action"] == "code":
+                    if "device" not in methods:
+                        message = "This server does not offer code sign-in. Use your username and password."
+                        continue
+                    if not self.device_sign_in(auth):
+                        message = "Code sign-in was canceled. You can sign in here instead."
+                        continue
+                    self.addon.setSetting("sign_in_method", "code")
+                else:
+                    if "password" not in methods:
+                        message = "This server requires code sign-in. Choose Sign in with a code."
+                        continue
+                    self.client.login(username, password)
+                    self.store.update({"auth_method": "password", "login_username": username,
+                                       "login_username_server": server_url})
+                    self.addon.setSetting("sign_in_method", "password")
+                self.addon.setSetting("server_url", server_url)
+                return True
+            except DeviceAuthCancelled:
+                message = "Code sign-in was canceled. You can sign in here instead."
+            except (ApiError, ValueError) as exc:
+                message = exc.message if isinstance(exc, ApiError) else str(exc)
+            finally:
+                password = ""
+                credentials.clear()
+        return False
 
     def device_sign_in(self, auth):
         progress = xbmcgui.DialogProgress()
@@ -178,7 +219,7 @@ class Application:
         finally:
             progress.close()
 
-    def choose_profile(self):
+    def choose_profile(self, force=False):
         if self.store.get("temporary_session"):
             profile_id = self.store.get("bound_profile_id")
             if not profile_id:
@@ -192,9 +233,13 @@ class Application:
             return False
         saved = str(self.store.get("profile_id") or "")
         preselect = next((i for i, profile in enumerate(profiles) if str(profile["id"]) == saved), 0)
-        selected = 0 if len(profiles) == 1 else self.dialog.select(
-            "Who's watching?", [str(profile["name"]) + ("  ·  PIN" if profile.get("has_pin") else "")
-                               for profile in profiles], preselect=preselect)
+        saved_exists = any(str(profile["id"]) == saved for profile in profiles)
+        if saved_exists and not force:
+            selected = preselect
+        else:
+            selected = 0 if len(profiles) == 1 else self.dialog.select(
+                "Who's watching?", [str(profile["name"]) + ("  ·  PIN" if profile.get("has_pin") else "")
+                                   for profile in profiles], preselect=preselect)
         if selected < 0:
             return False
         profile = profiles[selected]
@@ -293,7 +338,7 @@ class Application:
 
     def _browse_page(self, window, cursor=None):
         state = self.browse
-        params = dict(state["params"], limit=50)
+        params = dict(state["params"], limit=self.options()["page_size"])
         if cursor:
             params["cursor"] = cursor
         response = self.client.items(**params)
@@ -309,7 +354,10 @@ class Application:
             self._browse_page(window, self.browse["next_cursor"])
 
     def open_item(self, card):
-        item = self.client.item(card["content_id"])
+        content_id = card["content_id"]
+        if card.get("play_content_id") and card.get("item_source") in ("in_progress", "next_up"):
+            content_id = card["play_content_id"]
+        item = self.client.item(content_id)
         children = self.client.children(item) if item.get("type") in ("series", "season") else []
         if isinstance(children, dict):
             children = children.get("items", [])
@@ -318,10 +366,68 @@ class Application:
         window.doModal()
         del window
 
-    def play(self, item, resume=True):
+    def options(self):
+        return read_options(self.addon)
+
+    def choose_file(self, item, preferred_file_id=None):
+        versions = available_versions(item)
+        if not versions:
+            self.dialog.ok("Silo", "No media files are available for this title.")
+            return None
+        default = default_version(item, self.options()["file_selection"], preferred_file_id)
+        preselect = next(index for index, version in enumerate(versions) if version["file_id"] == default["file_id"])
+        entries = [xbmcgui.ListItem(label=version_label(version), label2=version_name(version)) for version in versions]
+        selected = self.dialog.select("Choose file", entries, preselect=preselect, useDetails=True)
+        return versions[selected]["file_id"] if 0 <= selected < len(versions) else None
+
+    def refresh_item(self, item, file_id=None):
+        params = {"file_id": file_id} if file_id is not None else {}
+        return self.client.item(item["content_id"], **params)
+
+    def play(self, item, resume=None, file_id=None):
+        """Generic Play follows preferences; explicit Resume/Start keeps its intent.
+
+        Return the chosen file so the detail screen can retain it after refresh.
+        Resume positions are source seconds, exactly as the catalog reports them.
+        """
         if not self.is_playable(item):
-            return
-        PlaybackController(self.client, self.addon).play(item, start_position=None if resume else 0)
+            return None
+        options = self.options()
+        version = default_version(item, options["file_selection"], file_id)
+        if not version:
+            self.dialog.ok("Silo", "No media files are available for this title.")
+            return None
+        if file_id is not None and version["file_id"] != file_id:
+            self.dialog.ok("Silo", "The selected file is no longer available. Choose another file.")
+            return None
+        if file_id is None and options["file_selection"] == "ask" and len(available_versions(item)) > 1:
+            file_id = self.choose_file(item, version["file_id"])
+            if file_id is None:
+                return None
+        else:
+            file_id = version["file_id"]
+        # Resolve effective markers and the latest progress for this exact file.
+        selected_item = self.refresh_item(item, file_id)
+        position = self.resume_seconds(selected_item)
+        selected_version = default_version(selected_item, preferred_file_id=file_id)
+        multipart = is_multipart(selected_version)
+        if resume is None and multipart:
+            # Silo intentionally avoids applying an item-global offset to a part.
+            resume = options["resume_behavior"] != "start"
+        elif resume is None and position:
+            behavior = options["resume_behavior"]
+            if behavior == "ask":
+                selected = self.dialog.select("Play {}".format(selected_item.get("title", "title")),
+                                              ["Resume from {}".format(format_time(position)), "Play from start"])
+                if selected < 0:
+                    return None
+                resume = selected == 0
+            else:
+                resume = behavior == "resume"
+        start_position = None if resume and multipart else position if resume else 0.0
+        PlaybackController(self.client, self.addon).play(
+            selected_item, start_position=start_position, file_id=file_id, options=options)
+        return file_id
 
     @staticmethod
     def is_playable(item):
@@ -329,8 +435,7 @@ class Application:
 
     @staticmethod
     def resume_seconds(item):
-        value = (item.get("user_data") or {}).get("position_seconds", item.get("position_seconds", 0))
-        return max(0.0, float(value or 0))
+        return resume_position(item)
 
     def artwork(self, item):
         result = {}

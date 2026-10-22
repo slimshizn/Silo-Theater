@@ -65,6 +65,14 @@ class CapabilityTests(unittest.TestCase):
         self.assertIn(7, next_codecs["hdr_details"]["dolby_vision_profiles"])
         self.assertIn("client_managed_dynamic_range_v1", next_context["deliveries"]["original_http"]["validated_claims"])
 
+    def test_resolution_override_only_changes_declared_decoder_limit(self):
+        for resolution in ("480p", "720p", "1080p", "2160p"):
+            with self.subTest(resolution=resolution):
+                codecs, context = playback_capabilities("auto", max_resolution=resolution)
+                self.assertEqual(codecs["max_resolution"], resolution)
+                self.assertFalse(codecs["hdr"])
+                assert_contract(self, codecs, "ClientCodecCapabilitiesV3")
+
 
 if __name__ == "__main__":
     unittest.main()

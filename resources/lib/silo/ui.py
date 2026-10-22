@@ -2,6 +2,8 @@
 
 import xbmcgui
 
+from .media import available_versions, default_version, format_time, is_multipart, version_label, version_name
+
 
 BACK_ACTIONS = {9, 10, 92, 216, 247, 257, 61448}
 
@@ -115,6 +117,8 @@ class DetailsWindow(xbmcgui.WindowXML):
         self.item = {}
         self.children = []
         self.initialized = False
+        self.selected_file_id = None
+        self.file_confirmed = False
 
     def onInit(self):
         if self.initialized:
@@ -122,33 +126,55 @@ class DetailsWindow(xbmcgui.WindowXML):
         self.initialized = True
         self.setProperty("silo.title", item_title(self.item))
         self.setProperty("silo.meta", item_subtitle(self.item))
-        plot = str(self.item.get("overview") or self.item.get("description") or "")
+        options = self.application.options()
+        show_plot = options["show_plot"]
+        blocks = []
+        overview = self.item.get("overview") or self.item.get("description")
+        if show_plot and overview:
+            blocks.append(str(overview))
         cast = self.item.get("cast", [])
         if cast:
-            plot += "\n\nCast: " + ", ".join(str(credit["name"]) for credit in cast[:6] if credit.get("name"))
+            blocks.append("Cast: " + ", ".join(str(credit["name"]) for credit in cast[:6] if credit.get("name")))
         ratings = self.item.get("ratings", [])
         if ratings:
-            plot += "\n\n" + "  ·  ".join("{} {}".format(rating.get("name", ""), rating.get("display", ""))
-                                                 for rating in ratings)
-        self.setProperty("silo.plot", plot)
+            blocks.append("  ·  ".join("{} {}".format(rating.get("name", ""), rating.get("display", ""))
+                                       for rating in ratings))
+        self.setProperty("silo.plot", "\n\n".join(blocks))
+        self.setProperty("silo.has_summary", "true" if blocks else "")
         art = self.application.artwork(self.item)
         self.setProperty("silo.poster", art.get("poster", ""))
         self.setProperty("silo.fanart", art.get("fanart", ""))
         playable = self.application.is_playable(self.item)
         self.setProperty("silo.playable", "true" if playable else "")
-        resume = self.update_resume()
+        self.setProperty("silo.continue", "true" if self.item.get("type") in ("series", "season")
+                         and self.item.get("play_content_id") else "")
+        self.update_file_selection()
+        self.update_resume()
         self.setProperty("silo.children", "true" if self.children else "")
-        self.setProperty("silo.children_label", "Seasons & episodes")
+        self.setProperty("silo.children_label", "Seasons" if self.item.get("type") == "series" else "Episodes")
         self.getControl(500).addItems([
             make_list_item(item, self.application) for item in self.children
         ])
-        self.setFocusId(101 if playable and resume > 0 else 100 if playable else 500 if self.children else 102)
+        # Play applies the saved preference; Resume/Start are explicit alternatives.
+        self.setFocusId(100 if playable and self.selected_file_id else 500 if self.children else 102)
+
+    def update_file_selection(self):
+        version = default_version(self.item, self.application.options()["file_selection"], self.selected_file_id)
+        self.selected_file_id = version["file_id"] if version else None
+        self.setProperty("silo.has_file", "true" if version else "")
+        if version:
+            label, name = version_label(version), version_name(version)
+            self.setProperty("silo.file_label", "File: " + label + (" — " + name if name != label else ""))
+        else:
+            self.setProperty("silo.file_label", "File: No media files available")
 
     def update_resume(self):
         resume = self.application.resume_seconds(self.item)
         playable = self.application.is_playable(self.item)
-        self.setProperty("silo.resume", "true" if playable and resume > 0 else "")
-        self.setProperty("silo.resume_label", "Resume from {}:{:02d}".format(int(resume) // 60, int(resume) % 60))
+        version = default_version(self.item, preferred_file_id=self.selected_file_id)
+        # A shared item offset is not a valid seek point inside a multipart file.
+        self.setProperty("silo.resume", "true" if playable and resume > 0 and not is_multipart(version) else "")
+        self.setProperty("silo.resume_label", "Resume from {}".format(format_time(resume)))
         return resume
 
     def onAction(self, action):
@@ -161,11 +187,27 @@ class DetailsWindow(xbmcgui.WindowXML):
     def _click(self, control_id):
         if control_id == 102:
             self.close()
-        elif control_id in (100, 101):
-            self.application.play(self.item, resume=control_id == 101)
-            self.item = self.application.client.item(self.item["content_id"])
-            self.update_resume()
+        elif control_id == 103:
+            file_id = self.application.choose_file(self.item, self.selected_file_id)
+            if file_id is not None:
+                self.refresh(file_id)
+        elif control_id == 105 and self.item.get("play_content_id"):
+            self.application.open_item({"content_id": self.item["play_content_id"]})
+        elif control_id in (100, 101, 104):
+            resume = {100: None, 101: True, 104: False}[control_id]
+            file_id = self.application.play(self.item, resume=resume,
+                                            file_id=self.selected_file_id if self.file_confirmed else None)
+            if file_id is not None:
+                self.refresh(file_id)
         elif control_id == 500:
             position = self.getControl(500).getSelectedPosition()
             if 0 <= position < len(self.children):
                 self.application.open_item(self.children[position])
+
+    def refresh(self, file_id):
+        item = self.application.refresh_item(self.item, file_id)
+        self.item = item
+        self.selected_file_id = file_id
+        self.file_confirmed = any(version["file_id"] == file_id for version in available_versions(item))
+        self.update_file_selection()
+        self.update_resume()

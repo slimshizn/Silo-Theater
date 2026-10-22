@@ -2,6 +2,7 @@
 
 import importlib
 from pathlib import Path
+import re
 import sys
 import types
 import unittest
@@ -46,6 +47,14 @@ with patch.dict(sys.modules, KODI_MODULES):
 
 Application = application_module.Application
 ApiError = application_module.ApiError
+
+
+def movie_item(position=75, multiple=False):
+    versions = [{"file_id": "file-a", "resolution": "2160p", "hdr": True, "file_name": "Example.UHD.mkv"}]
+    if multiple:
+        versions.append({"file_id": "file-b", "resolution": "1080p", "hdr": False, "file_name": "Example.HD.mkv"})
+    return {"content_id": "movie:1", "type": "movie", "title": "Example", "versions": versions,
+            "user_data": {"position_seconds": position, "duration_seconds": 7200, "last_file_id": "file-a"}}
 
 
 class Store(dict):
@@ -172,13 +181,105 @@ class ApplicationFlowTests(unittest.TestCase):
         self.assertEqual(window.return_value.children, [season])
         window.return_value.doModal.assert_called_once()
 
-    def test_resume_uses_server_position_and_start_explicitly_passes_zero(self):
-        item = {"content_id": "movie:1", "type": "movie"}
+    def test_resume_uses_latest_saved_source_position_and_start_passes_zero(self):
+        item = movie_item()
+        refreshed = movie_item(125.75)
+        self.app.client.item.return_value = refreshed
         with patch.object(application_module, "PlaybackController") as player:
             self.app.play(item, resume=True)
-            player.return_value.play.assert_called_with(item, start_position=None)
+            self.assertEqual(player.return_value.play.call_args.kwargs["start_position"], 125.75)
+            self.assertEqual(player.return_value.play.call_args.kwargs["file_id"], "file-a")
+            self.assertIs(player.return_value.play.call_args.args[0], refreshed)
             self.app.play(item, resume=False)
-            player.return_value.play.assert_called_with(item, start_position=0)
+            self.assertEqual(player.return_value.play.call_args.kwargs["start_position"], 0)
+        self.app.client.item.assert_called_with("movie:1", file_id="file-a")
+
+    def test_multiple_files_prompt_can_select_an_alternate_opaque_id(self):
+        item = movie_item(multiple=True)
+        self.app.dialog.select.return_value = 1
+        self.app.client.item.return_value = item
+        with patch.object(application_module, "PlaybackController") as player:
+            selected = self.app.play(item, resume=True)
+        self.assertEqual(selected, "file-b")
+        self.assertEqual(player.return_value.play.call_args.kwargs["file_id"], "file-b")
+        self.app.client.item.assert_called_with("movie:1", file_id="file-b")
+        self.assertTrue(self.app.dialog.select.call_args.kwargs["useDetails"])
+
+    def test_cancel_file_picker_never_starts_or_changes_progress(self):
+        self.app.dialog.select.return_value = -1
+        with patch.object(application_module, "PlaybackController") as player:
+            self.assertIsNone(self.app.play(movie_item(multiple=True)))
+        player.assert_not_called()
+        self.app.client.item.assert_not_called()
+
+    def test_explicit_selected_file_skips_repeat_prompt(self):
+        self.app.client.item.return_value = movie_item(multiple=True)
+        with patch.object(application_module, "PlaybackController") as player:
+            self.assertEqual(self.app.play(movie_item(multiple=True), file_id="file-b", resume=True), "file-b")
+        self.app.dialog.select.assert_not_called()
+        self.assertEqual(player.return_value.play.call_args.kwargs["file_id"], "file-b")
+
+    def test_removed_explicit_file_is_not_replaced_silently(self):
+        with patch.object(application_module, "PlaybackController") as player:
+            self.assertIsNone(self.app.play(movie_item(), file_id="removed", resume=True))
+        player.assert_not_called()
+        self.app.dialog.ok.assert_called_once()
+
+    def test_generic_play_respects_start_preference_but_explicit_resume_overrides(self):
+        self.app.addon.getSetting.side_effect = lambda key: "start" if key == "resume_behavior" else ""
+        self.app.client.item.return_value = movie_item()
+        with patch.object(application_module, "PlaybackController") as player:
+            self.app.play(movie_item())
+            self.assertEqual(player.return_value.play.call_args.kwargs["start_position"], 0)
+            self.app.play(movie_item(), resume=True)
+            self.assertEqual(player.return_value.play.call_args.kwargs["start_position"], 75)
+
+    def test_ask_resume_policy_can_resume_start_or_cancel(self):
+        self.app.addon.getSetting.side_effect = lambda key: "ask" if key == "resume_behavior" else ""
+        self.app.client.item.return_value = movie_item()
+        for selected, expected in ((0, 75), (1, 0), (-1, None)):
+            self.app.dialog.select.return_value = selected
+            with patch.object(application_module, "PlaybackController") as player:
+                result = self.app.play(movie_item())
+            if expected is None:
+                self.assertIsNone(result)
+                player.assert_not_called()
+            else:
+                self.assertEqual(player.return_value.play.call_args.kwargs["start_position"], expected)
+
+    def test_multipart_resume_defers_offset_to_server_but_start_is_explicit_zero(self):
+        item = movie_item()
+        item["versions"][0].update(presentation_kind="multipart_movie", presentation_part_index=2, presentation_part_total=2)
+        self.app.client.item.return_value = item
+        with patch.object(application_module, "PlaybackController") as player:
+            self.app.play(item, resume=True)
+            self.assertIsNone(player.return_value.play.call_args.kwargs["start_position"])
+            self.app.play(item, resume=False)
+            self.assertEqual(player.return_value.play.call_args.kwargs["start_position"], 0)
+
+    def test_continue_watching_card_opens_playable_episode_but_library_series_stays_series(self):
+        episode = {"content_id": "episode:2", "type": "episode", "title": "Episode 2"}
+        card = {"content_id": "series:1", "type": "series", "play_content_id": "episode:2", "item_source": "next_up"}
+        self.app.client.item.return_value = episode
+        with patch.object(application_module, "DetailsWindow"):
+            self.app.open_item(card)
+        self.app.client.item.assert_called_with("episode:2")
+        self.app.client.children.assert_not_called()
+        self.app.client.item.reset_mock()
+        series = {"content_id": "series:1", "type": "series", "title": "Series", "play_content_id": "episode:2"}
+        self.app.client.item.return_value = series
+        self.app.client.children.return_value = {"items": []}
+        with patch.object(application_module, "DetailsWindow"):
+            self.app.open_item({key: value for key, value in card.items() if key != "item_source"})
+        self.app.client.item.assert_called_once_with("series:1")
+        self.app.client.children.assert_called_once_with(series)
+
+    def test_configured_catalog_page_size_is_used(self):
+        self.app.addon.getSetting.side_effect = lambda key: "100" if key == "page_size" else ""
+        self.app.browse = {"heading": "Movies", "sections": [], "params": {"type": "movie"}}
+        self.app.client.items.return_value = {"items": [], "page": {"has_more": False}}
+        self.app._browse_page(MagicMock())
+        self.app.client.items.assert_called_once_with(type="movie", limit=100)
 
     def test_session_storage_failure_is_shown_inside_startup_error_handler(self):
         self.app.store = None
@@ -193,6 +294,9 @@ class WindowTests(unittest.TestCase):
         self.app.guard.side_effect = lambda callback: callback()
         self.app.artwork.return_value = {}
         self.app.store = Store()
+        self.app.options.return_value = {"file_selection": "ask", "show_plot": True, "resume_behavior": "resume"}
+        self.app.resume_seconds.side_effect = Application.resume_seconds
+        self.app.is_playable.side_effect = Application.is_playable
 
     def test_item_selection_opens_corresponding_detail(self):
         window = ui.HomeWindow("SiloHome.xml", ".")
@@ -227,20 +331,107 @@ class WindowTests(unittest.TestCase):
     def test_detail_refreshes_resume_after_playback(self):
         window = ui.DetailsWindow("SiloDetails.xml", ".")
         window.application = self.app
-        window.item = {"content_id": "movie:1", "type": "movie", "title": "Example"}
-        self.app.is_playable.return_value = True
-        self.app.resume_seconds.return_value = 75
-        updated = dict(window.item, user_data={"position_seconds": 75})
-        self.app.client.item.return_value = updated
+        original = movie_item(0)
+        window.item = original
+        updated = movie_item(75)
+        self.app.play.return_value = "file-a"
+        self.app.refresh_item.return_value = updated
         window.onClick(100)
-        self.app.play.assert_called_once_with({"content_id": "movie:1", "type": "movie", "title": "Example"}, resume=False)
+        self.app.play.assert_called_once_with(original, resume=None, file_id=None)
         self.assertEqual(window.properties["silo.resume_label"], "Resume from 1:15")
         self.assertIs(window.item, updated)
+
+    def test_manual_file_choice_is_visible_and_preserved_after_playback_refresh(self):
+        window = ui.DetailsWindow("SiloDetails.xml", ".")
+        window.application, window.item = self.app, movie_item(multiple=True)
+        self.app.choose_file.return_value = "file-b"
+        refreshed = movie_item(120, multiple=True)
+        self.app.refresh_item.return_value = refreshed
+        window.onClick(103)
+        self.assertEqual(window.selected_file_id, "file-b")
+        self.assertIn("Example.HD.mkv", window.properties["silo.file_label"])
+        self.assertIn("1080p", window.properties["silo.file_label"])
+        self.app.play.return_value = "file-b"
+        window.onClick(101)
+        self.app.play.assert_called_once_with(refreshed, resume=True, file_id="file-b")
+        self.assertEqual(window.selected_file_id, "file-b")
+        self.assertTrue(window.file_confirmed)
+
+    def test_file_picker_cancel_leaves_selection_untouched(self):
+        window = ui.DetailsWindow("SiloDetails.xml", ".")
+        window.application, window.item = self.app, movie_item(multiple=True)
+        window.selected_file_id = "file-a"
+        self.app.choose_file.return_value = None
+        window.onClick(103)
+        self.assertEqual(window.selected_file_id, "file-a")
+        self.app.refresh_item.assert_not_called()
+
+    def test_play_start_and_resume_controls_keep_distinct_intents(self):
+        window = ui.DetailsWindow("SiloDetails.xml", ".")
+        window.application, window.item = self.app, movie_item()
+        self.app.play.return_value = None
+        for control_id, intent in ((100, None), (101, True), (104, False)):
+            window.onClick(control_id)
+            self.assertIs(self.app.play.call_args.kwargs["resume"], intent)
+
+    def test_primary_focus_is_generic_play_even_when_resume_exists(self):
+        window = ui.DetailsWindow("SiloDetails.xml", ".")
+        window.application, window.item = self.app, movie_item()
+        self.app.options.return_value["resume_behavior"] = "start"
+        window.onInit()
+        self.assertEqual(window.focus, 100)
+        self.assertEqual(window.properties["silo.resume"], "true")
+
+    def test_completed_progress_hides_resume_and_spoiler_setting_keeps_cast_ratings(self):
+        window = ui.DetailsWindow("SiloDetails.xml", ".")
+        item = movie_item()
+        item.update(overview="A spoiler", cast=[{"name": "Actor"}], ratings=[{"name": "IMDb", "display": "8.5"}])
+        item["user_data"]["played"] = True
+        window.application, window.item = self.app, item
+        self.app.options.return_value["show_plot"] = False
+        window.onInit()
+        self.assertEqual(window.properties["silo.resume"], "")
+        self.assertNotIn("A spoiler", window.properties["silo.plot"])
+        self.assertIn("Actor", window.properties["silo.plot"])
+        self.assertIn("IMDb 8.5", window.properties["silo.plot"])
+
+    def test_series_continue_button_opens_the_next_episode_detail(self):
+        window = ui.DetailsWindow("SiloDetails.xml", ".")
+        window.application = self.app
+        window.item = {"content_id": "series:1", "type": "series", "play_content_id": "episode:2"}
+        window.onClick(105)
+        self.app.open_item.assert_called_once_with({"content_id": "episode:2"})
+
+    def test_remote_navigation_always_targets_visible_enabled_controls(self):
+        tree = ET.parse(Path(__file__).resolve().parents[1] / "resources/skins/Default/1080i/SiloDetails.xml")
+        controls = {int(node.attrib["id"]): node for node in tree.iter("control") if "id" in node.attrib}
+
+        def condition_matches(condition, visible, enabled):
+            for term in condition.split(" + "):
+                match = re.fullmatch(r"(!?)Control.Is(Visible|Enabled)\((\d+)\)", term)
+                self.assertIsNotNone(match, term)
+                negated, kind, target = match.groups()
+                value = int(target) in (visible if kind == "Visible" else enabled)
+                if value == bool(negated):
+                    return False
+            return True
+
+        # Movie with/without saved progress, series with/without Next Up, empty detail.
+        for visible, disabled in (({100, 101, 102, 103, 104}, set()), ({100, 102, 103}, set()),
+                                  ({102, 105, 500}, set()), ({102, 500}, set()),
+                                  ({102}, set()), ({100, 102, 103}, {100, 103})):
+            enabled = visible - disabled
+            for current in enabled:
+                for direction in ("onleft", "onright", "onup", "ondown"):
+                    choices = controls[current].findall(direction)
+                    target = next((int(node.text) for node in choices if not node.get("condition")
+                                   or condition_matches(node.attrib["condition"], visible, enabled)), None)
+                    self.assertIn(target, enabled, (current, direction, visible))
 
     def test_skin_control_ids_match_controllers(self):
         root = Path(__file__).resolve().parents[1] / "resources/skins/Default/1080i"
         for name, required in (("SiloHome.xml", {100, 101, 102, 103, 104, 105, 106, 300, 500}),
-                               ("SiloDetails.xml", {100, 101, 102, 500})):
+                               ("SiloDetails.xml", {100, 101, 102, 103, 104, 105, 500})):
             tree = ET.parse(root / name)
             ids = [int(control.attrib["id"]) for control in tree.iter("control") if "id" in control.attrib]
             self.assertEqual(len(ids), len(set(ids)), name)

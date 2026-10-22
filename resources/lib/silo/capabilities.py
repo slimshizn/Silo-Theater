@@ -13,7 +13,7 @@ AUDIO_CODECS = ("aac", "ac3", "eac3", "truehd", "dts", "flac", "mp3", "opus", "v
 CONTAINERS = ("mkv", "matroska", "mp4", "mov", "avi", "mpegts", "ts", "webm")
 
 
-def playback_capabilities(mode="auto", app_version="0.1.1"):
+def playback_capabilities(mode="auto", app_version="0.2.0", max_resolution="auto"):
     """Return the v2 start body's codec capabilities and playback context.
 
     Kodi's decoder can decode these formats in software, but the first build
@@ -29,7 +29,8 @@ def playback_capabilities(mode="auto", app_version="0.1.1"):
         "video_evidence": "declared", "audio_evidence": "declared",
         "codecs_video": list(VIDEO_CODECS), "codecs_video_hardware": [],
         "codecs_audio": list(AUDIO_CODECS), "containers": list(CONTAINERS),
-        "max_resolution": "2160p" if mode != "auto" else "1080p",
+        "max_resolution": max_resolution if max_resolution in ("480p", "720p", "1080p", "2160p")
+        else "2160p" if mode != "auto" else "1080p",
         "hdr": mode != "auto", "hdr_details": hdr,
     }
     original = {

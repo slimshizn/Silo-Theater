@@ -662,6 +662,65 @@
         "hardware"
       ],
       "type": "object"
+    },
+    "PlaybackCapabilities": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "description": "Whether the current principal may use the capability",
+          "type": "boolean"
+        },
+        "deliveries": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "features": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "installation_id": {
+          "description": "Opaque identifier",
+          "examples": [
+            "1"
+          ],
+          "minLength": 1,
+          "type": "string"
+        },
+        "protocol_versions": {
+          "items": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "description": "Opaque revision of this document",
+          "type": "string"
+        },
+        "state": {
+          "description": "Support and configuration state, not health",
+          "enum": [
+            "available",
+            "disabled",
+            "not_configured",
+            "unsupported"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol_versions",
+        "features",
+        "deliveries",
+        "revision",
+        "state",
+        "allowed"
+      ],
+      "type": "object"
     }
   }
 }

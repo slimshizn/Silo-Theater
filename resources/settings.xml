@@ -11,7 +11,7 @@
         </setting>
         <setting id="sign_in_method" type="string" label="32003">
           <level>0</level>
-          <default>code</default>
+          <default>password</default>
           <constraints>
             <options>
               <option label="32004">code</option>
@@ -24,6 +24,32 @@
     </category>
     <category id="playback" label="32010">
       <group id="1">
+        <setting id="resume_behavior" type="string" label="32020" help="32024">
+          <level>0</level>
+          <default>resume</default>
+          <constraints>
+            <options>
+              <option label="32021">resume</option>
+              <option label="32022">ask</option>
+              <option label="32023">start</option>
+            </options>
+          </constraints>
+          <control type="spinner" format="string" />
+        </setting>
+        <setting id="file_selection" type="string" label="32025" help="32029">
+          <level>0</level>
+          <default>ask</default>
+          <constraints>
+            <options>
+              <option label="32026">ask</option>
+              <option label="32027">last_played</option>
+              <option label="32028">first</option>
+            </options>
+          </constraints>
+          <control type="spinner" format="string" />
+        </setting>
+      </group>
+      <group id="2">
         <setting id="dv_mode" type="string" label="32011" help="32016">
           <level>0</level>
           <default>auto</default>
@@ -37,6 +63,22 @@
           </constraints>
           <control type="spinner" format="string" />
         </setting>
+        <setting id="max_resolution" type="string" label="32030" help="32036">
+          <level>0</level>
+          <default>auto</default>
+          <constraints>
+            <options>
+              <option label="32031">auto</option>
+              <option label="32032">480p</option>
+              <option label="32033">720p</option>
+              <option label="32034">1080p</option>
+              <option label="32035">2160p</option>
+            </options>
+          </constraints>
+          <control type="spinner" format="string" />
+        </setting>
+      </group>
+      <group id="3">
         <setting id="auto_next" type="boolean" label="32017">
           <level>0</level>
           <visible>false</visible>
@@ -48,6 +90,42 @@
           <default>10</default>
           <constraints><minimum>5</minimum><step>5</step><maximum>10</maximum></constraints>
           <control type="spinner" format="integer" />
+        </setting>
+      </group>
+    </category>
+    <category id="subtitles" label="32040">
+      <group id="1">
+        <setting id="subtitle_mode" type="string" label="32041" help="32044">
+          <level>0</level>
+          <default>server</default>
+          <constraints>
+            <options>
+              <option label="32042">server</option>
+              <option label="32043">off</option>
+            </options>
+          </constraints>
+          <control type="spinner" format="string" />
+        </setting>
+      </group>
+    </category>
+    <category id="interface" label="32050">
+      <group id="1">
+        <setting id="page_size" type="integer" label="32051" help="32055">
+          <level>1</level>
+          <default>50</default>
+          <constraints>
+            <options>
+              <option label="32052">25</option>
+              <option label="32053">50</option>
+              <option label="32054">100</option>
+            </options>
+          </constraints>
+          <control type="spinner" format="string" />
+        </setting>
+        <setting id="show_plot" type="boolean" label="32056" help="32057">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle" />
         </setting>
       </group>
     </category>

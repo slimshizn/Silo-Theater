@@ -281,6 +281,10 @@ class SiloClient:
     def libraries(self):
         return self.request("GET", "/user/libraries")
 
+    def playback_capability(self):
+        """Read the server-owned installation identity before a new attempt."""
+        return self.request("GET", "/playback/capabilities")
+
     def items(self, library_id=None, parent_id=None, **filters):
         if parent_id is not None:
             return self.children(parent_id, **filters)

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 msgid ""
 msgstr ""
-"Project-Id-Version: script.silo 0.1.0\n"
+"Project-Id-Version: script.silo 0.2.0\n"
 "Language: en_GB\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -71,4 +71,124 @@ msgstr ""
 
 msgctxt "#32019"
 msgid "How often playback progress is sent to your Silo server."
+msgstr ""
+
+msgctxt "#32020"
+msgid "Default playback action"
+msgstr ""
+
+msgctxt "#32021"
+msgid "Resume saved progress"
+msgstr ""
+
+msgctxt "#32022"
+msgid "Ask before resuming"
+msgstr ""
+
+msgctxt "#32023"
+msgid "Start from beginning"
+msgstr ""
+
+msgctxt "#32024"
+msgid "Choose what Play does when a title has saved progress. The Resume and Start from beginning buttons always keep their explicit action."
+msgstr ""
+
+msgctxt "#32025"
+msgid "File selection"
+msgstr ""
+
+msgctxt "#32026"
+msgid "Ask when multiple files are available"
+msgstr ""
+
+msgctxt "#32027"
+msgid "Use last played file"
+msgstr ""
+
+msgctxt "#32028"
+msgid "Use first available file"
+msgstr ""
+
+msgctxt "#32029"
+msgid "Choose the default for titles with multiple media files. You can always change the selected file on the title screen."
+msgstr ""
+
+msgctxt "#32030"
+msgid "Maximum video resolution"
+msgstr ""
+
+msgctxt "#32031"
+msgid "Follow display setting"
+msgstr ""
+
+msgctxt "#32032"
+msgid "480p"
+msgstr ""
+
+msgctxt "#32033"
+msgid "720p"
+msgstr ""
+
+msgctxt "#32034"
+msgid "1080p"
+msgstr ""
+
+msgctxt "#32035"
+msgid "2160p (4K)"
+msgstr ""
+
+msgctxt "#32036"
+msgid "Declare your device's resolution limit. Follow display setting uses 1080p for SDR or unknown displays and 2160p for HDR modes. Files above this limit may be refused; this setting does not convert them."
+msgstr ""
+
+msgctxt "#32040"
+msgid "Subtitles"
+msgstr ""
+
+msgctxt "#32041"
+msgid "Subtitle default"
+msgstr ""
+
+msgctxt "#32042"
+msgid "Use Silo selection"
+msgstr ""
+
+msgctxt "#32043"
+msgid "Off"
+msgstr ""
+
+msgctxt "#32044"
+msgid "Use the subtitle selection returned by Silo, or start playback with subtitles hidden and no subtitle sidecar attached."
+msgstr ""
+
+msgctxt "#32050"
+msgid "Interface"
+msgstr ""
+
+msgctxt "#32051"
+msgid "Titles per page"
+msgstr ""
+
+msgctxt "#32052"
+msgid "25"
+msgstr ""
+
+msgctxt "#32053"
+msgid "50"
+msgstr ""
+
+msgctxt "#32054"
+msgid "100"
+msgstr ""
+
+msgctxt "#32055"
+msgid "Number of titles loaded per page when browsing a library or searching."
+msgstr ""
+
+msgctxt "#32056"
+msgid "Show plot summaries"
+msgstr ""
+
+msgctxt "#32057"
+msgid "Display plot summaries on title details screens."
 msgstr ""
