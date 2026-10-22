@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.silotheater" name="Founders Theater Widgets" version="1.0.2" provider-name="slimshizn">
+<addon id="plugin.video.silotheater" name="Founders Theater Widgets" version="1.0.3" provider-name="slimshizn">
   <requires>
     <import addon="xbmc.python" version="3.0.1" />
     <import addon="script.silo" version="0.5.5" />
@@ -12,5 +12,8 @@
     <description lang="en_GB">Shows your Silo home rows, Watchlist and Favorites as video folders that Kodi skins can use as home-screen widgets. Selecting a title plays it in Founders Theater, which must be installed and signed in. A community add-on, not an official Silo app.</description>
     <license>AGPL-3.0-or-later</license>
     <platform>all</platform>
+    <assets>
+      <icon>icon.png</icon>
+    </assets>
   </extension>
 </addon>
