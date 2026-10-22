@@ -159,7 +159,6 @@ def build_repository(root: Path = ROOT, output_dir: Optional[Path] = None) -> Di
     if widgets is not None:
         widgets_name = "{}-{}.zip".format(WIDGETS_ID, widgets[0].get("version"))
         packages[output / "zips" / WIDGETS_ID / widgets_name] = widgets[1]
-        packages[output / "zips" / WIDGETS_ID / "icon.png"] = (root / "widgets" / "icon.png").read_bytes()
         # Validate all immutable destinations before updating any catalog or file.
     for path, contents in packages.items():
         if path.exists() and path.read_bytes() != contents:
@@ -178,6 +177,13 @@ def build_repository(root: Path = ROOT, output_dir: Optional[Path] = None) -> Di
     for path, contents in packages.items():
         _write(path, contents)
         _write(path.with_suffix(path.suffix + ".sha256"), hashlib.sha256(contents).hexdigest().encode("ascii") + b"\n")
+    # Kodi's repository browser shows each add-on's icon from datadir before
+    # install. Icons are not versioned, so they are replaced on every build.
+    icons = {output / "zips" / addon["id"] / "resources" / "icon.png": root / "resources" / "icon.png"}
+    if widgets is not None:
+        icons[output / "zips" / WIDGETS_ID / "icon.png"] = root / "widgets" / "icon.png"
+    for path, source in icons.items():
+        _write(path, source.read_bytes())
     _write(output / "addons.xml", catalog_bytes)
     _write(output / "addons.xml.md5", checksum)
     _write(output / "index.html", landing_page)
