@@ -85,7 +85,18 @@
           <default>false</default>
           <control type="toggle" />
         </setting>
+        <setting id="framerate_asked" type="boolean" label="32011">
+          <level>0</level>
+          <visible>false</visible>
+          <default>false</default>
+          <control type="toggle" />
+        </setting>
         <setting id="auto_next" type="boolean" label="32017" help="32058">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle" />
+        </setting>
+        <setting id="stop_on_back" type="boolean" label="32101" help="32102">
           <level>0</level>
           <default>true</default>
           <control type="toggle" />

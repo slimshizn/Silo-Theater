@@ -379,10 +379,24 @@ class PlaybackSessionTests(unittest.TestCase):
         client = FakeClient()
         session = PlaybackSession(client)
         session.start("file-a")
-        for bad in (float("nan"), float("inf"), -1):
+        for bad in (float("nan"), float("inf")):
             with self.subTest(sample=bad), self.assertRaises(PlaybackError):
                 session.progress(bad)
         self.assertEqual(len(client.calls), 2)
+
+    def test_slightly_negative_kodi_times_mean_the_start_not_an_error(self):
+        # Kodi reports small negative times around seeks and HLS starts; an
+        # earlier build stopped playback with "invalid playback time" for them.
+        client = FakeClient()
+        session = PlaybackSession(client)
+        session.start("file-a")
+        session.progress(-0.4)
+        self.assertEqual(session.position, 0.0)
+        decision = playable_decision()
+        decision["playback_plan"]["timeline"]["player_start_seconds"] = -2
+        with self.assertRaises(PlaybackError) as raised:
+            PlaybackSession(FakeClient(decision)).start("file-a")
+        self.assertIn("timeline.player_start_seconds", str(raised.exception))
 
     def test_terminal_201_decision_never_opens_the_kodi_player(self):
         terminal = {"protocol_version": 3, "server_features": [], "outcome": "terminal",
@@ -697,7 +711,46 @@ class KodiHarness(unittest.TestCase):
         return state
 
 
+class FullscreenFor:
+    """Fullscreen video is visible for the first ``checks`` polls, then gone (Back)."""
+
+    def __init__(self, checks):
+        self.checks = checks
+
+    def __contains__(self, name):
+        if name != "Window.IsVisible(fullscreenvideo)":
+            return False
+        self.checks -= 1
+        return self.checks >= 0
+
+
 class ControllerTests(KodiHarness):
+    def test_back_out_of_fullscreen_stops_playback(self):
+        self.conditions = FullscreenFor(3)
+        client = FakeClient()
+        ticks = [(1 + index * 0.25, None) for index in range(20)]
+        state = self.run_player(client, ticks, start=0)
+        self.assertTrue(any("left_fullscreen_stop" in line for line in state.logs))
+        self.assertEqual(client.calls[-1][0], "DELETE")
+        self.assertFalse(state.result["ended"])
+
+    def test_dialogs_over_fullscreen_and_the_setting_keep_playing(self):
+        self.conditions = FullscreenFor(1000)
+        state = self.run_player(FakeClient(), [(1 + index * 0.25, None) for index in range(12)] + [(4.5, "stop")],
+                                start=0)
+        self.assertFalse(any("left_fullscreen_stop" in line for line in state.logs))
+        self.conditions = FullscreenFor(3)
+        state = self.run_player(FakeClient(), [(1 + index * 0.25, None) for index in range(12)] + [(4.5, "stop")],
+                                start=0, options={"progress_interval": 10, "subtitle_mode": "server",
+                                                  "stop_on_back": False})
+        self.assertFalse(any("left_fullscreen_stop" in line for line in state.logs))
+
+    def test_never_fullscreen_never_stops(self):
+        self.conditions = FullscreenFor(0)
+        state = self.run_player(FakeClient(), [(1 + index * 0.25, None) for index in range(12)] + [(4.5, "stop")],
+                                start=0)
+        self.assertFalse(any("left_fullscreen_stop" in line for line in state.logs))
+
     def test_resume_waits_for_seek_then_stop_uses_cached_sample_without_native_callback_reads(self):
         client = FakeClient(playable_decision(source_start=180, player_start=180))
         state = self.run_player(client, [(0, None), (0.2, None), (180.1, None), (180.6, "stop")], start=180)

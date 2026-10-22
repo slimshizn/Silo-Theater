@@ -22,6 +22,7 @@ DEFAULTS = {
     "skip_prompts": True,
     "player_menu_key": True,
     "hide_spoilers": False,
+    "stop_on_back": True,
     "profile_select": "auto",
     "resume_rewind": 7,
     "still_watching": 3,
@@ -29,7 +30,7 @@ DEFAULTS = {
     "max_bitrate": 0,
 }
 
-BOOLEANS = ("show_plot", "auto_next", "skip_prompts", "player_menu_key", "hide_spoilers")
+BOOLEANS = ("show_plot", "auto_next", "skip_prompts", "player_menu_key", "hide_spoilers", "stop_on_back")
 
 CHOICES = {
     "sign_in_method": ("code", "password"),

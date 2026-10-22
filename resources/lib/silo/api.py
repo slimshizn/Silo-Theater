@@ -209,6 +209,23 @@ class SiloClient:
                     headers["X-Profile-Token"] = profile_token
         return headers
 
+    # Endpoints whose artwork honours image_size and the per-slot widths.
+    ARTWORK_PATHS = ("/catalog/items/", "/catalog/series/", "/home/", "/library/", "/watchlist",
+                     "/favorites", "/history", "/shuffles", "/watch/")
+
+    def configure_artwork(self, params):
+        """Ask for artwork at the size this device draws it (see Application.configure_artwork)."""
+        self.artwork_params = {key: value for key, value in dict(params or {}).items() if value}
+
+    def _with_artwork(self, method, path, params):
+        extra = getattr(self, "artwork_params", None)
+        path = str(path).split("?", 1)[0]
+        if method != "GET" or not extra or not (path == "/catalog" or path.startswith(self.ARTWORK_PATHS)):
+            return params
+        merged = dict(extra)
+        merged.update(params or {})
+        return merged
+
     def request(self, method, path, body=None, authenticated=True, profile=True,
                 params=None, retry_auth=True):
         """Make one request, refreshing once on 401; never retry network errors.
@@ -218,6 +235,7 @@ class SiloClient:
         """
         self._check_scope()
         method = method.upper()
+        params = self._with_artwork(method, path, params)
         url = self._url(path, params)
         headers = self.headers(authenticated, profile)
         self._check_scope()

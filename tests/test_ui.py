@@ -500,6 +500,33 @@ class ApplicationFlowTests(unittest.TestCase):
         self.app.run(["default.py", "delete", "movie:1"])
         self.assertIsNone(self.app.deep_link)
 
+    def test_artwork_is_requested_at_screen_size_when_the_server_offers_widths(self):
+        caps = {"state": "available", "slot_width_params": {
+            "poster": "poster_width", "backdrop": "backdrop_width", "logo": "logo_width",
+            "still": "still_width", "photo": "photo_width"}}
+        self.app.client.request.return_value = caps
+        with patch.object(application_module.xbmc, "getInfoLabel", create=True, return_value="3840"):
+            self.app.configure_artwork()
+        params = self.app.client.configure_artwork.call_args.args[0]
+        self.assertEqual(params, {"image_size": "large", "backdrop_width": 3840, "poster_width": 800,
+                                  "logo_width": 1800, "still_width": 1440, "photo_width": 880})
+        self.app.client.request.side_effect = ApiError(404, "Not found")
+        with patch.object(application_module.xbmc, "getInfoLabel", create=True, return_value=""):
+            self.app.configure_artwork()
+        self.assertEqual(self.app.client.configure_artwork.call_args.args[0], {"image_size": "large"})
+
+    def test_artwork_parameters_only_ride_on_artwork_get_requests(self):
+        client = application_module.SiloClient.__new__(application_module.SiloClient)
+        client.configure_artwork({"image_size": "large", "backdrop_width": 1920})
+        self.assertEqual(client._with_artwork("GET", "/catalog", {"type": "movie"}),
+                         {"image_size": "large", "backdrop_width": 1920, "type": "movie"})
+        self.assertEqual(client._with_artwork("GET", "/home/sections", None)["backdrop_width"], 1920)
+        self.assertEqual(client._with_artwork("GET", "/catalog/items/movie:1", {"image_size": "small"})["image_size"],
+                         "small")
+        for method, path in (("GET", "/catalog/filters"), ("GET", "/profiles"), ("POST", "/catalog/letters"),
+                             ("GET", "/recommendations/discover")):
+            self.assertEqual(client._with_artwork(method, path, {"q": 1}), {"q": 1}, path)
+
     def test_session_storage_failure_is_shown_inside_startup_error_handler(self):
         self.app.store = None
         with patch.object(application_module, "SessionStore", side_effect=application_module.StorageError("Cannot read session")):

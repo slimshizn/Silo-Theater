@@ -14,6 +14,10 @@ from .recovery import forget_session, remember_session, remember_stop
 from .storage import StorageError
 
 
+# How long fullscreen video must be gone before playback stops (see the poll loop).
+LEFT_FULLSCREEN_SECONDS = 1.0
+
+
 class PlaybackError(Exception):
     """A plan cannot be executed by this build."""
 
@@ -78,11 +82,26 @@ def embedded_subtitle_index(subtitle):
     return next((index for index, entry in enumerate(embedded) if entry.get("track_id") == track_id), None)
 
 
-def _number(value, signed=False):
+def _number(value, signed=False, field=None):
+    """A server timeline value: finite, and not negative unless ``signed``."""
     value = float(value)
     if not math.isfinite(value) or (not signed and value < 0):
-        raise PlaybackError("The server returned an invalid playback time.")
+        raise PlaybackError("The server returned an invalid playback time{}.".format(
+            " ({})".format(field) if field else ""))
     return value
+
+
+def _position(value):
+    """A playback position from Kodi or derived from it.
+
+    Kodi briefly reports slightly negative times around seeks and while an HLS
+    stream starts; that is the start of the video, not an error. Only a value
+    that is not a number at all stops playback.
+    """
+    value = float(value)
+    if not math.isfinite(value):
+        raise PlaybackError("Kodi reported an invalid playback position.")
+    return max(0.0, value)
 
 
 def kodi_media_url(server_url, stream):
@@ -146,7 +165,7 @@ def _bandwidth_cap(options):
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.5.0", options=None):
+    def __init__(self, client, mode="auto", version="0.5.1", options=None):
         self.client, self.mode, self.version = client, mode, version
         self.options = dict(options or {})
         # /api/v2 calls this installation_id, but it identifies the SERVER.
@@ -212,7 +231,7 @@ class PlaybackSession:
             # The server converts anything above this ceiling (decimal kbps).
             body["bandwidth_cap_kbps"] = cap
         if start_position is not None:
-            body["start_position"] = _number(start_position)
+            body["start_position"] = _position(start_position)
         # Without a subtitle field Silo plans subtitles off.
         track = self.options.get("subtitle_track_index")
         if (isinstance(track, int) and not isinstance(track, bool) and track >= 0
@@ -250,7 +269,7 @@ class PlaybackSession:
             # session id is retained so finally can still release this attempt.
             raise PlaybackError(str(error)) from error
         self._validate(plan)
-        self.position = _number(plan["timeline"]["source_start_seconds"])
+        self.position = _number(plan["timeline"]["source_start_seconds"], field="timeline.source_start_seconds")
         return plan
 
     def _validate(self, plan):
@@ -261,8 +280,10 @@ class PlaybackSession:
         timeline = plan.get("timeline") or {}
         try:
             for key in ("source_start_seconds", "player_start_seconds", "timeline_offset_seconds"):
-                _number(timeline[key], signed=key == "timeline_offset_seconds")
-        except (KeyError, TypeError, ValueError) as error:
+                _number(timeline[key], signed=key == "timeline_offset_seconds", field="timeline." + key)
+        except KeyError as error:
+            raise PlaybackError("The server returned an incomplete playback timeline ({}).".format(error.args[0])) from error
+        except (TypeError, ValueError) as error:
             raise PlaybackError("The server returned an invalid playback timeline.") from error
         kodi_media_url(self.client.server_url, plan.get("stream") or {})
 
@@ -314,7 +335,7 @@ class PlaybackSession:
         if operation == "failure_recovery":
             body["failure"] = {"classification": str(classification or "playback_failed")[:64]}
         if position is not None:
-            body["position_seconds"] = min(31536000.0, _number(position))
+            body["position_seconds"] = min(31536000.0, _position(position))
         if operation == "track_change":
             # Only a track change reads an omitted subtitle as "off", so the
             # current server subtitle is restated with the new audio track.
@@ -364,7 +385,7 @@ class PlaybackSession:
             return
         if offset is None:
             offset = self.plan["timeline"]["timeline_offset_seconds"]
-        self.position = _number(float(player_position) + float(offset))
+        self.position = _position(float(player_position) + float(offset))
         self.paused = bool(paused)
         self.has_sample = True
 
@@ -437,14 +458,14 @@ class ResumeGuard:
     """Do not persist pre-seek zeroes while Kodi restores a saved position."""
 
     def __init__(self, target, clock=None, timeout=10):
-        self.target = _number(target)
+        self.target = _position(target)
         self.clock = clock or time.monotonic
         self.started = self.clock()
         self.timeout = timeout
         self.confirmed = self.target == 0
 
     def accept(self, position):
-        position = _number(position)
+        position = _position(position)
         if self.confirmed:
             return True
         elapsed = self.clock() - self.started
@@ -543,7 +564,7 @@ class ProgressReporter:
 
     def submit(self, position, paused=False, offset=None):
         """Queue a player-time sample; ``offset`` pins the plan timeline it belongs to."""
-        sample = (_number(position), bool(paused))
+        sample = (_position(position), bool(paused))
         if offset is not None:
             sample += (_number(offset, signed=True),)
         with self._condition:
@@ -655,7 +676,7 @@ def rewound_start(start_position, rewind):
     """Back a saved resume point up by ``rewind`` seconds, never below zero."""
     if start_position is None:
         return None
-    start = _number(start_position)
+    start = _position(start_position)
     if start <= 0 or isinstance(rewind, bool) or not isinstance(rewind, (int, float)) or rewind <= 0:
         return start
     return max(0.0, start - float(rewind))
@@ -871,7 +892,7 @@ class PlaybackController:
 
         def source_position():
             if latest_sample is not None:
-                return _number(latest_sample[0] + latest_sample[2])
+                return _position(latest_sample[0] + latest_sample[2])
             return session.position
 
         def mount(plan, switching):
@@ -936,7 +957,7 @@ class PlaybackController:
             if player.finished:
                 return "finished"
             log_event("av_started")
-            start = _number(plan["timeline"]["player_start_seconds"])
+            start = _number(plan["timeline"]["player_start_seconds"], field="timeline.player_start_seconds")
             guard = ResumeGuard(start)
             stage = "resume_seek"
             if start:
@@ -1064,7 +1085,7 @@ class PlaybackController:
         def extras_seek(target):
             # On a server-anchored timeline a deliberate jump is a reanchor.
             if server_anchored(session.plan):
-                pending_reanchor.append(_number(target) + session.plan["timeline"]["timeline_offset_seconds"])
+                pending_reanchor.append(_position(target) + session.plan["timeline"]["timeline_offset_seconds"])
             else:
                 player.seekTime(target)
 
@@ -1089,6 +1110,11 @@ class PlaybackController:
             extras_total, extras_total_at = None, 0.0
             revision = player.state_revision
             unavailable_since = None
+            # Back during fullscreen video returns Kodi to its menus while the
+            # video keeps playing, and this add-on's screens stay frozen until
+            # it ends. Like the Silo apps, leaving fullscreen video stops it.
+            stop_on_back = options.get("stop_on_back", True)
+            fullscreen_seen, away_since = False, None
             while not player.finished:
                 if monitor.waitForAbort(0.25):
                     stop_local()
@@ -1129,7 +1155,7 @@ class PlaybackController:
                 if not guard.accept(current):
                     continue
                 offset = session.plan["timeline"]["timeline_offset_seconds"]
-                latest_sample = (_number(current), bool(player.paused), _number(offset, signed=True))
+                latest_sample = (_position(current), bool(player.paused), _number(offset, signed=True))
                 reporter.submit(*latest_sample)
                 now = time.monotonic()
                 if server_anchored(session.plan) and previous is not None:
@@ -1145,6 +1171,17 @@ class PlaybackController:
                             break
                         continue
                 previous = (latest_sample[0], now)
+                if stop_on_back and not player._stale():
+                    # Kodi's own dialogs and Silo's overlays sit above fullscreen
+                    # video, so they keep it visible; only leaving it counts.
+                    if has_condition("Window.IsVisible(fullscreenvideo)"):
+                        fullscreen_seen, away_since = True, None
+                    elif fullscreen_seen:
+                        away_since = away_since or now
+                        if now - away_since >= LEFT_FULLSCREEN_SECONDS:
+                            log_event("left_fullscreen_stop", latest_sample[0])
+                            stop_local()
+                            break
                 caching = has_condition("Player.Caching")
                 if recovery.nudges >= recovery.max_nudges:
                     if not recovery.exhausted_reported:

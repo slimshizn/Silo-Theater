@@ -179,9 +179,10 @@ class LayoutTests(unittest.TestCase):
                          ["Default", "English", "Automatic", "On", "Default"])
         self.assertEqual(window.getControl(button(4)).setLabel.call_args[0][0], "Metadata language")
         select_category(window, DEVICE)
-        self.assertEqual(window.getControl(button(5)).setLabel.call_args[0][0], "More device settings…")
-        self.assertEqual([value_label(window, index) for index in (3, 4)],
-                         ["Only when no profile is saved", "Off"])
+        self.assertEqual(window.getControl(button(7)).setLabel.call_args[0][0], "More device settings…")
+        # Back stops playback is on by default; frame-rate matching reads Kodi (off without JSON-RPC).
+        self.assertEqual([value_label(window, index) for index in (2, 3, 5, 6)],
+                         ["On", "Off", "Only when no profile is saved", "Off"])
 
     def test_up_and_down_move_within_rows_and_the_hint_opens_under_the_focused_row(self):
         window = open_window()

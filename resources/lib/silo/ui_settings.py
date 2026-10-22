@@ -4,6 +4,7 @@ import xbmcgui
 
 from . import svc_profiles as svc
 from .api import ApiError
+from . import kodi_settings
 from .settings import DEFAULTS, INTEGER_CHOICES, read_options
 from .ui_common import ACTION_DOWN, ACTION_LEFT, ACTION_UP, BACK_ACTIONS, set_properties
 
@@ -19,6 +20,8 @@ HINT_INDENT, HINT_SPACE = 24, 44
 # Row kinds: profile preferences (TOGGLE, CHOICE) are saved on the server; device
 # settings (DEVICE, DEVICE_CHOICE) with addon.setSetting; ACTION rows run an account action.
 TOGGLE, CHOICE, DEVICE, DEVICE_CHOICE, MORE, ACTION = "toggle", "choice", "device", "device_choice", "more", "action"
+# KODI rows show and change one of Kodi's own settings (frame-rate matching) through JSON-RPC.
+KODI = "kodi"
 
 QUALITIES = (("auto", "Automatic"), ("original", "Original"), ("2160p", "4K (2160p)"),
              ("1080p", "1080p"), ("720p", "720p"))
@@ -75,6 +78,11 @@ THIS_DEVICE = ("This device", (
     row(DEVICE, "Play next episode automatically", "auto_next"),
     row(DEVICE, "Show skip buttons", "skip_prompts",
         hint="Offers Skip intro, Skip recap and Skip credits during playback."),
+    row(DEVICE, "Back stops playback", "stop_on_back",
+        hint="Back during a Silo video stops it. Turn off to keep it playing behind Kodi's menus."),
+    row(KODI, "Match frame rate", kodi_settings.FRAME_RATE, kodi_settings.FRAME_RATE_CHOICES,
+        hint="Switches the TV to each video's frame rate (24p films play without judder). "
+             "Kodi pauses 2 seconds while the TV switches."),
     row(DEVICE, "Silo player menu on the Menu key", "player_menu_key",
         hint="The Menu key (C on a keyboard) opens the Silo player menu during playback."),
     row(DEVICE_CHOICE, "Ask who's watching", "profile_select", PROFILE_SELECT_CHOICES,
@@ -205,6 +213,8 @@ class SettingsWindow(xbmcgui.WindowXML):
         if kind == DEVICE_CHOICE:
             value = self.device_value(item["key"])
             return next((label for code, label in item["choices"] if code == value), str(value))
+        if kind == KODI:
+            return kodi_settings.label(item["choices"], kodi_settings.get(item["key"]))
         return ""
 
     # ------------------------------------------------------------ layout
@@ -325,7 +335,25 @@ class SettingsWindow(xbmcgui.WindowXML):
             self.toggle_device(item["key"])
         elif kind == DEVICE_CHOICE:
             self.choose_device(item)
+        elif kind == KODI:
+            self.choose_kodi(item)
         self.render_rows()
+
+    def choose_kodi(self, item):
+        values = [code for code, _label in item["choices"]]
+        current = kodi_settings.get(item["key"])
+        preselect = values.index(current) if current in values else -1
+        choice = self.application.dialog.select(item["label"], [label for _code, label in item["choices"]],
+                                                preselect=preselect)
+        if not 0 <= choice < len(values) or choice == preselect:
+            return
+        if not kodi_settings.set_value(item["key"], values[choice]):
+            self.application.dialog.ok("Silo", "Kodi did not accept this change on this device.")
+            return
+        if item["key"] == kodi_settings.FRAME_RATE and values[choice] and not kodi_settings.get(
+                kodi_settings.FRAME_RATE_PAUSE):
+            # Most TVs blank for a moment while switching; give them time.
+            kodi_settings.set_value(kodi_settings.FRAME_RATE_PAUSE, 20)
 
     def choose_device(self, item):
         values = [code for code, _label in item["choices"]]

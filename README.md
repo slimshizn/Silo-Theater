@@ -46,13 +46,15 @@ make build
 make repository
 ```
 
-`make build` creates `dist/script.silo-0.5.0.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
+`make build` creates `dist/script.silo-0.5.1.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
-Version **0.5.0** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** in Settings to limit converted streams.
+Version **0.5.1** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** in Settings to limit converted streams.
 
 ### During playback
+
+Press **Back** to stop a Silo video and return to Silo Theater, as in the Silo apps (turn off **Back stops playback** in Silo Settings → This device to keep Kodi's background playback). Turn on **Match frame rate** there, or answer yes when Silo Theater first asks, to switch the TV to each video's frame rate; Kodi pauses 2 seconds while the TV switches.
 
 Press **Menu** on the remote (**C** on a keyboard) to open the Silo player menu. It shows playback info and live stats, and lets you change the version, speed, aspect, sleep timer, audio track and subtitles, or jump to a chapter. Audio delay and subtitle style open Kodi's own settings. Kodi passes keys to add-ons only through keymaps, so Silo Theater adds one small keymap file that is active only in fullscreen video; turn off **Silo player menu on the Menu key** in its settings to remove it.
 

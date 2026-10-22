@@ -160,7 +160,9 @@ class Application:
             return
         self.mark_active()
         self._recover_playback()
+        self.configure_artwork()
         self.ensure_display_setup()
+        self.ensure_frame_rate_setup()
         self.sync_keymap()
         if getattr(self, "deep_link", None):
             action, content_id = self.deep_link
@@ -254,6 +256,57 @@ class Application:
         if mode is not None:
             self.addon.setSetting("dv_mode", mode)
         self.addon.setSetting("display_setup_done", "true")
+
+    # Width each artwork slot is drawn at on a 1920-wide skin; scaled to the screen.
+    ARTWORK_SLOTS_1080 = {"poster": 400, "logo": 900, "still": 720, "photo": 440}
+
+    def configure_artwork(self):
+        """Request artwork sharp enough for this screen.
+
+        The server's list defaults are small. When it advertises per-slot
+        widths (GET /images/capabilities), backdrops come at the full screen
+        width and the other slots at the size they are drawn; otherwise the
+        "large" preset is used.
+        """
+        try:
+            width = int(float(xbmc.getInfoLabel("System.ScreenWidth") or 1920))
+        except (AttributeError, TypeError, ValueError):
+            width = 1920
+        width = max(1280, min(7680, width))
+        params = {"image_size": "large"}
+        try:
+            capabilities = self.client.request("GET", "/images/capabilities") or {}
+        except (ApiError, OSError, ValueError):
+            capabilities = {}
+        slots = capabilities.get("slot_width_params") if capabilities.get("state") == "available" else None
+        if isinstance(slots, dict):
+            wanted = dict({slot: px * width / 1920.0 for slot, px in self.ARTWORK_SLOTS_1080.items()},
+                          backdrop=width)
+            params.update({str(slots[slot]): int(round(px)) for slot, px in wanted.items()
+                           if isinstance(slots.get(slot), str) and slots[slot]})
+        try:
+            self.client.configure_artwork(params)
+        except AttributeError:
+            pass
+
+    def ensure_frame_rate_setup(self):
+        """Offer Kodi's frame-rate matching once, when it is off on this device."""
+        from . import kodi_settings
+
+        if self.addon.getSetting("framerate_asked") == "true":
+            return
+        current = kodi_settings.get(kodi_settings.FRAME_RATE)
+        if current is None:
+            return  # Not offered on this Kodi; ask again on a later launch.
+        self.addon.setSetting("framerate_asked", "true")
+        if current != 0:
+            return
+        if self.dialog.yesno("Match frame rate",
+                             "Switch the TV to each video's frame rate, so films play without judder?\n\n"
+                             "You can change this later in Silo Settings → This device."):
+            if kodi_settings.set_value(kodi_settings.FRAME_RATE, 2) and not kodi_settings.get(
+                    kodi_settings.FRAME_RATE_PAUSE):
+                kodi_settings.set_value(kodi_settings.FRAME_RATE_PAUSE, 20)
 
     def sign_in(self):
         if self.client is None:
