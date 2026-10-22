@@ -42,7 +42,10 @@ def playback_capabilities(mode="auto", app_version="0.2.1", max_resolution="auto
                       "ass_styling": True, "embedded_bitmap": True,
                       "sidecar_bitmap": False, "font_attachments": True},
         "features": [], "transformations": [],
-        "validated_claims": ["client_managed_dynamic_range_v1"] if mode == "p7_fel" else [],
+        # Kodi selects the planned audio track itself (setAudioStream with the
+        # plan's audio ordinal), so a non-default track needs no server remux.
+        "validated_claims": ["client_selected_audio_track_v1"]
+        + (["client_managed_dynamic_range_v1"] if mode == "p7_fel" else []),
     }
     context = {
         "protocol_version": 3, "form_factor": "tv", "app_version": app_version,

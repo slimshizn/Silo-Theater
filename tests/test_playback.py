@@ -1,8 +1,10 @@
 """Offline playback protocol and Kodi boundary regression tests."""
 
 from copy import deepcopy
+import os
 from pathlib import Path
 import sys
+import tempfile
 from types import SimpleNamespace
 import threading
 import time
@@ -12,7 +14,9 @@ from urllib.parse import parse_qs
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "resources/lib"))
 
-from silo.playback import PlaybackController, PlaybackError, PlaybackSession, ProgressReporter, ResumeGuard, kodi_media_url, select_file
+from silo.playback import (CAPABILITY_TERMINALS, PlaybackController, PlaybackError, PlaybackSession,
+                           ProgressReporter, ResumeGuard, embedded_subtitle_index, kodi_media_url,
+                           select_file, subtitle_extension)
 from silo.api import ApiError, SiloClient
 from silo.storage import StorageError
 from playback_contract import assert_contract
@@ -67,6 +71,14 @@ class FakeClient:
         self.fail_stop_once = False
         self.progress_outcome = "applied"
         self.capabilities = server_capabilities()
+        self.subtitle_bytes = b"1\n00:00:01,000 --> 00:00:02,000\nHello\n"
+        self.download_error = None
+
+    def download(self, url, max_bytes):
+        self.calls.append(("DOWNLOAD", url, None))
+        if self.download_error is not None:
+            raise self.download_error
+        return self.subtitle_bytes
 
     def request(self, method, path, body):
         self.calls.append((method, path, deepcopy(body)))
@@ -419,6 +431,23 @@ class PlaybackSessionTests(unittest.TestCase):
         assert_contract(self, body, "PlaybackStartBody")
 
 
+    def test_capability_terminals_name_the_display_setting_to_change(self):
+        for reason in sorted(CAPABILITY_TERMINALS):
+            with self.subTest(reason=reason):
+                decision = {"protocol_version": 3, "server_features": [], "outcome": "terminal",
+                            "terminal": {"reason": reason, "message": "server wording", "retryable": False}}
+                with self.assertRaises(PlaybackError) as error:
+                    PlaybackSession(FakeClient(decision)).start("file-a")
+                self.assertIn("HDR and Dolby Vision capability", str(error.exception))
+                self.assertIn("Maximum video resolution", str(error.exception))
+
+    def test_other_terminals_keep_the_server_message(self):
+        decision = {"protocol_version": 3, "server_features": [], "outcome": "terminal",
+                    "terminal": {"reason": "source_unreadable", "message": "The file is unreadable", "retryable": False}}
+        with self.assertRaisesRegex(PlaybackError, "The file is unreadable"):
+            PlaybackSession(FakeClient(decision)).start("file-a")
+
+
 class ResumeGuardTests(unittest.TestCase):
     def test_startup_zero_and_early_seek_samples_are_not_accepted(self):
         now = [0.0]
@@ -451,7 +480,9 @@ class ControllerTests(unittest.TestCase):
     def run_player(self, client, events, start=None, options=None, file_id=None):
         """Exercise the real controller against a Kodi callback/event double."""
         state = SimpleNamespace(now=0.0, player=None, dialogs=[], subtitles=[], visibility=[], seeks=[],
-                                in_callback=False, logs=[], native_times=0)
+                                in_callback=False, logs=[], native_times=0,
+                                subtitle_streams=getattr(self, "subtitle_streams", []), subtitle_selected=[],
+                                profile_dir=getattr(self, "profile_dir", None) or tempfile.mkdtemp())
         pending = list(events)
         polling_thread = threading.get_ident()
 
@@ -494,6 +525,12 @@ class ControllerTests(unittest.TestCase):
 
             def setSubtitles(self, url):
                 state.subtitles.append(url)
+
+            def getAvailableSubtitleStreams(self):
+                return list(state.subtitle_streams)
+
+            def setSubtitleStream(self, index):
+                state.subtitle_selected.append(index)
 
         class Monitor:
             def waitForAbort(self, seconds):
@@ -540,7 +577,9 @@ class ControllerTests(unittest.TestCase):
                                log=lambda message, level: state.logs.append(message), LOGWARNING=2, LOGINFO=1)
         xbmcgui = SimpleNamespace(ListItem=ListItem, Dialog=lambda: SimpleNamespace(ok=lambda *args: state.dialogs.append(args)))
         addon = SimpleNamespace(getSetting=lambda key: "", getAddonInfo=lambda key: "0.2.1")
-        with patch.dict(sys.modules, {"xbmc": xbmc, "xbmcgui": xbmcgui}), patch("silo.playback.time.monotonic", side_effect=lambda: state.now):
+        xbmcvfs = SimpleNamespace(translatePath=lambda path: state.profile_dir)
+        with patch.dict(sys.modules, {"xbmc": xbmc, "xbmcgui": xbmcgui, "xbmcvfs": xbmcvfs}), \
+                patch("silo.playback.time.monotonic", side_effect=lambda: state.now):
             controller = PlaybackController(client, addon)
             controller.play({"file_id": "default-file", "title": "A title"},
                             start_position=start, file_id=file_id,
@@ -646,6 +685,118 @@ class ControllerTests(unittest.TestCase):
         self.assertTrue(any("event=native_time_lost" in message for message in state.logs))
         self.assertFalse(state.result["has_sample"])
         self.assertNotIn("position", client.calls[-1][2])
+
+
+    def subtitle_decision(self, subtitle):
+        decision = playable_decision()
+        decision["playback_plan"]["subtitle"] = subtitle
+        return decision
+
+    def test_sidecar_subtitle_is_saved_locally_and_kodi_never_gets_credentials(self):
+        artifact_url = "/api/v2/stream/s1/subtitles/2.vtt?file_id=f&external_subtitle_key=k"
+        client = FakeClient(self.subtitle_decision(
+            {"mode": "render", "track_id": "file:f:subtitle:2",
+             "artifact": {"url": artifact_url, "format": "vtt", "mime_type": "text/vtt"}}))
+        state = self.run_player(client, [(1, None), (2, "stop")], start=0)
+        self.assertIn(("DOWNLOAD", artifact_url, None), client.calls)
+        self.assertEqual(len(state.subtitles), 1)
+        path = state.subtitles[0]
+        self.assertTrue(path.startswith(os.path.join(state.profile_dir, "subtitles")))
+        self.assertTrue(path.endswith(".vtt"))
+        for secret in ("|", "Bearer", "Authorization", "X-Profile", "http"):
+            self.assertNotIn(secret, path)
+        with open(path, "rb") as handle:
+            self.assertEqual(handle.read(), client.subtitle_bytes)
+
+    def test_previous_subtitle_files_are_replaced(self):
+        self.profile_dir = tempfile.mkdtemp()
+        folder = os.path.join(self.profile_dir, "subtitles")
+        os.makedirs(folder)
+        old = os.path.join(folder, "silo-subtitle-old.srt")
+        unrelated = os.path.join(folder, "keep-me.txt")
+        for name in (old, unrelated):
+            with open(name, "w") as handle:
+                handle.write("x")
+        try:
+            client = FakeClient(self.subtitle_decision(
+                {"mode": "render", "artifact": {"url": "/api/v2/stream/s1/subtitles/0.srt"}}))
+            state = self.run_player(client, [(1, None), (2, "stop")], start=0)
+        finally:
+            del self.profile_dir
+        self.assertFalse(os.path.exists(old))
+        self.assertTrue(os.path.exists(unrelated))
+        self.assertEqual(len(state.subtitles), 1)
+
+    def test_subtitle_download_failure_still_plays_without_subtitles(self):
+        client = FakeClient(self.subtitle_decision(
+            {"mode": "render", "artifact": {"url": "/api/v2/stream/s1/subtitles/2.srt"}}))
+        client.download_error = ApiError(404, "Not found", "download_failed")
+        state = self.run_player(client, [(1, None), (2, "stop")], start=0)
+        self.assertEqual(state.subtitles, [])
+        self.assertEqual(state.dialogs, [])
+        self.assertTrue(any("subtitle_unavailable" in line for line in state.logs))
+        self.assertEqual(client.calls[-1][0], "DELETE")
+
+    def test_embedded_subtitle_track_is_selected_by_its_embedded_position(self):
+        self.subtitle_streams = ["eng (PGS)", "eng (SRT)", "fre"]
+        try:
+            client = FakeClient(self.subtitle_decision({
+                "mode": "render", "track_id": "file:f:subtitle:3",
+                "embedded": {"stream_index": 7, "container_track_id": "8"},
+                "inventory": [
+                    {"source": "external", "combined_index": 0, "track_id": "file:f:subtitle:0"},
+                    {"source": "embedded", "combined_index": 1, "track_id": "file:f:subtitle:1",
+                     "delivery": "burn_in_only"},
+                    {"source": "embedded", "combined_index": 2, "track_id": "file:f:subtitle:2"},
+                    {"source": "embedded", "combined_index": 3, "track_id": "file:f:subtitle:3"},
+                    {"source": "downloaded", "combined_index": 4, "track_id": "file:f:subtitle:4"},
+                ]}))
+            state = self.run_player(client, [(1, None), (2, "stop")], start=0)
+        finally:
+            del self.subtitle_streams
+        self.assertEqual(state.subtitle_selected, [2])
+        self.assertEqual(state.visibility, [True])
+        self.assertEqual(state.subtitles, [])
+        self.assertFalse(any(call[0] == "DOWNLOAD" for call in client.calls))
+
+    def test_embedded_track_beyond_kodis_list_is_left_alone(self):
+        self.subtitle_streams = ["eng"]
+        try:
+            client = FakeClient(self.subtitle_decision({
+                "mode": "render", "track_id": "file:f:subtitle:2", "embedded": {"stream_index": 5},
+                "inventory": [{"source": "embedded", "combined_index": i, "track_id": "file:f:subtitle:%d" % i}
+                              for i in range(3)]}))
+            state = self.run_player(client, [(1, None), (2, "stop")], start=0)
+        finally:
+            del self.subtitle_streams
+        self.assertEqual(state.subtitle_selected, [])
+        self.assertEqual(state.visibility, [])
+
+
+class SubtitleHelperTests(unittest.TestCase):
+    def test_embedded_index_counts_only_embedded_entries_in_combined_order(self):
+        subtitle = {"mode": "render", "track_id": "t5", "embedded": {"stream_index": 9},
+                    "inventory": [{"source": "embedded", "combined_index": 5, "track_id": "t5"},
+                                  {"source": "external", "combined_index": 0, "track_id": "t0"},
+                                  {"source": "embedded", "combined_index": 2, "track_id": "t2"}]}
+        self.assertEqual(embedded_subtitle_index(subtitle), 1)
+
+    def test_embedded_index_is_none_unless_rendering_a_known_embedded_track(self):
+        base = {"mode": "render", "track_id": "t1", "embedded": {"stream_index": 3},
+                "inventory": [{"source": "embedded", "combined_index": 1, "track_id": "t1"}]}
+        self.assertEqual(embedded_subtitle_index(base), 0)
+        for change in ({"mode": "off"}, {"mode": "burn_in"}, {"embedded": None}, {"track_id": ""},
+                       {"track_id": "missing"}, {"inventory": None}):
+            with self.subTest(change=change):
+                self.assertIsNone(embedded_subtitle_index(dict(base, **change)))
+
+    def test_subtitle_extension_prefers_format_then_mime_then_url(self):
+        self.assertEqual(subtitle_extension({"format": "webvtt"}), "vtt")
+        self.assertEqual(subtitle_extension({"format": "ASS"}), "ass")
+        self.assertEqual(subtitle_extension({"mime_type": "text/vtt"}), "vtt")
+        self.assertEqual(subtitle_extension({"url": "/s/3.ssa?file_id=x"}), "ssa")
+        self.assertEqual(subtitle_extension({"url": "/s/3?file_id=x"}), "srt")
+        self.assertEqual(subtitle_extension({"format": "../../evil"}), "srt")
 
 
 class ProgressReporterTests(unittest.TestCase):

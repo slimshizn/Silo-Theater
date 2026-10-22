@@ -1,6 +1,7 @@
 """Native Silo playback core and a lazily imported Kodi player adapter."""
 
 import math
+import os
 import threading
 import time
 import uuid
@@ -14,6 +15,59 @@ from .storage import StorageError
 
 class PlaybackError(Exception):
     """A plan cannot be executed by this build."""
+
+
+# Terminal reasons a 201 carries when the original file exceeds what this
+# device declared (HDR range or resolution) and the route the server would
+# need instead is one this direct-play build does not offer.
+CAPABILITY_TERMINALS = frozenset({
+    "client_hls_unsupported", "adaptation_unavailable", "hdr_transcode_unsupported",
+    "video_conversion_unsupported", "dv_conversion_unsupported",
+    "transcoding_disabled", "local_transcode_disabled",
+})
+CAPABILITY_GUIDANCE = (
+    "This title needs a format this device isn't set to play directly, such as HDR, "
+    "Dolby Vision or 4K. If your TV supports it, change Settings → Playback → "
+    "HDR and Dolby Vision capability or Maximum video resolution, then play it again."
+)
+SUBTITLE_LIMIT = 8 * 1024 * 1024
+SUBTITLE_EXTENSIONS = ("srt", "vtt", "ass", "ssa")
+
+
+def subtitle_extension(artifact):
+    """Pick the file extension Kodi uses to recognize a sidecar's format."""
+    value = str(artifact.get("format") or "").lower().lstrip(".")
+    value = {"webvtt": "vtt", "subrip": "srt"}.get(value, value)
+    if value in SUBTITLE_EXTENSIONS:
+        return value
+    mime = str(artifact.get("mime_type") or "").lower()
+    if "vtt" in mime:
+        return "vtt"
+    if "ssa" in mime or "ass" in mime:
+        return "ass"
+    suffix = urlsplit(str(artifact.get("url") or "")).path.rsplit(".", 1)[-1].lower()
+    return suffix if suffix in SUBTITLE_EXTENSIONS else "srt"
+
+
+def embedded_subtitle_index(subtitle):
+    """Kodi's subtitle-stream index for a plan that renders an embedded track.
+
+    The plan's embedded.stream_index is FFmpeg's absolute stream number, not
+    Kodi's subtitle ordinal. The inventory lists every embedded track in
+    container order (bitmap tracks keep their place), so the selected track's
+    position among the embedded entries is the ordinal Kodi uses.
+    """
+    if subtitle.get("mode") != "render" or not isinstance(subtitle.get("embedded"), dict):
+        return None
+    track_id = subtitle.get("track_id")
+    if not track_id:
+        return None
+    embedded = sorted(
+        (entry for entry in subtitle.get("inventory") or []
+         if isinstance(entry, dict) and entry.get("source") == "embedded"
+         and isinstance(entry.get("combined_index"), int) and not isinstance(entry.get("combined_index"), bool)),
+        key=lambda entry: entry["combined_index"])
+    return next((index for index, entry in enumerate(embedded) if entry.get("track_id") == track_id), None)
 
 
 def _number(value, signed=False):
@@ -128,6 +182,8 @@ class PlaybackSession:
             raise PlaybackError("The server did not return playback protocol 3.")
         if decision.get("outcome") != "playable":
             terminal = decision.get("terminal") or {}
+            if terminal.get("reason") in CAPABILITY_TERMINALS:
+                raise PlaybackError(CAPABILITY_GUIDANCE)
             raise PlaybackError(terminal.get("message") or terminal.get("reason") or "No playable route is available.")
         plan = decision.get("playback_plan") or {}
         self.session_id = decision.get("session_id") or plan.get("session_id")
@@ -379,6 +435,32 @@ class PlaybackController:
         self.last_result = None
         self.last_reporter = None
 
+    def _save_subtitle(self, artifact, log_event):
+        """Download a sidecar with the add-on's own headers; return a local path.
+
+        A missing subtitle never blocks playback: failures are logged by code
+        and the title plays without it.
+        """
+        import xbmcvfs
+
+        try:
+            data = self.client.download(artifact.get("url"), SUBTITLE_LIMIT)
+            folder = os.path.join(xbmcvfs.translatePath(self.addon.getAddonInfo("profile")), "subtitles")
+            os.makedirs(folder, mode=0o700, exist_ok=True)
+            for name in os.listdir(folder):
+                if name.startswith("silo-subtitle-"):
+                    try:
+                        os.unlink(os.path.join(folder, name))
+                    except OSError:
+                        pass
+            path = os.path.join(folder, "silo-subtitle-{}.{}".format(uuid.uuid4().hex, subtitle_extension(artifact)))
+            with open(path, "wb") as handle:
+                handle.write(data)
+            return path
+        except (ApiError, OSError) as error:
+            log_event("subtitle_unavailable", error=error if isinstance(error, ApiError) else None)
+            return None
+
     def play(self, item, start_position=None, file_id=None, options=None):
         import xbmc
         import xbmcgui
@@ -459,12 +541,16 @@ class PlaybackController:
             plan = session.start(str(file_id) if file_id is not None else select_file(item), start_position)
             log_event("plan_ready", session.position)
             path = kodi_media_url(self.client.server_url, plan["stream"])
-            # Credential refresh for subtitle setup happens before media opens.
+            # Subtitle setup, including any credential refresh, happens before
+            # media opens. Sidecars are saved locally so Kodi never receives a
+            # URL carrying the sign-in or profile token.
             subtitle = plan.get("subtitle") or {}
-            subtitle_path = None
-            if options.get("subtitle_mode", "server") != "off" and subtitle.get("artifact"):
-                subtitle_path = kodi_media_url(self.client.server_url,
-                    {"url": subtitle["artifact"]["url"], "headers": self.client.headers()})
+            subtitle_path, embedded_index = None, None
+            if options.get("subtitle_mode", "server") != "off":
+                if subtitle.get("artifact"):
+                    subtitle_path = self._save_subtitle(subtitle["artifact"], log_event)
+                else:
+                    embedded_index = embedded_subtitle_index(subtitle)
             reporter = start_reporter()
             listitem = xbmcgui.ListItem(label=item.get("title", "Silo"), path=path)
             tag = listitem.getVideoInfoTag()
@@ -505,6 +591,11 @@ class PlaybackController:
                     player.showSubtitles(False)
                 elif subtitle_path:
                     player.setSubtitles(subtitle_path)
+                elif embedded_index is not None:
+                    streams = player.getAvailableSubtitleStreams()
+                    if not player.finished and 0 <= embedded_index < len(streams):
+                        player.setSubtitleStream(embedded_index)
+                        player.showSubtitles(True)
             stage = "polling"
             revision = player.state_revision
             unavailable_since = None

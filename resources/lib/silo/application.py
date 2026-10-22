@@ -71,6 +71,7 @@ class Application:
         if not self.choose_profile():
             return
         self._recover_playback()
+        self.ensure_display_setup()
 
         while not self.monitor.abortRequested():
             window = HomeWindow("SiloHome.xml", self.addon.getAddonInfo("path"),
@@ -107,8 +108,36 @@ class Application:
         self.recovery_worker = start_recovery(self.client)
 
     def _connect(self, server_url):
-        self.client = SiloClient(server_url, self.store)
+        version = "".join(char for char in str(self.addon.getAddonInfo("version")) if char in "0123456789.")[:24]
+        self.client = SiloClient(server_url, self.store,
+                                 user_agent="SiloTheater/" + version if version else "SiloTheater")
         self.server_name = urlsplit(self.client.server_url).hostname or "Silo"
+
+    # The default display setting declares SDR and 1080p, and this build plays
+    # original files only, so HDR and 4K titles are refused until the device is
+    # described. Ask once, on the first launch that reaches the library.
+    DISPLAY_CHOICES = (
+        ("HD TV or monitor (SDR, up to 1080p)", "auto"),
+        ("4K TV with HDR10", "hdr10"),
+        ("4K TV with Dolby Vision", "dv"),
+        ("Dolby Vision P7 FEL player (for example CoreELEC on a Dolby Vision Amlogic box)", "p7_fel"),
+        ("Decide later in Settings", None),
+    )
+
+    def ensure_display_setup(self):
+        if self.addon.getSetting("display_setup_done") == "true":
+            return
+        if self.addon.getSetting("dv_mode") not in ("", "auto") or self.addon.getSetting("max_resolution") not in ("", "auto"):
+            # Someone already described this device in Settings.
+            self.addon.setSetting("display_setup_done", "true")
+            return
+        selected = self.dialog.select("What can this TV show?", [label for label, _ in self.DISPLAY_CHOICES])
+        if not isinstance(selected, int) or not 0 <= selected < len(self.DISPLAY_CHOICES):
+            return  # Backed out: ask again next launch.
+        mode = self.DISPLAY_CHOICES[selected][1]
+        if mode is not None:
+            self.addon.setSetting("dv_mode", mode)
+        self.addon.setSetting("display_setup_done", "true")
 
     def sign_in(self):
         if self.client is None:

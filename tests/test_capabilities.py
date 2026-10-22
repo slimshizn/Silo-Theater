@@ -41,7 +41,16 @@ class CapabilityTests(unittest.TestCase):
                 self.assertFalse(codecs["hdr_details"]["hdr10"])
                 self.assertFalse(codecs["hdr_details"]["hdr10_plus"])
                 self.assertEqual(codecs["hdr_details"]["dolby_vision_profiles"], [])
-                self.assertEqual(context["deliveries"]["original_http"]["validated_claims"], [])
+                # The audio-track claim says nothing about HDR output.
+                self.assertEqual(context["deliveries"]["original_http"]["validated_claims"],
+                                 ["client_selected_audio_track_v1"])
+
+    def test_every_mode_claims_client_side_audio_track_selection(self):
+        for mode in ("auto", "hdr10", "dv", "p7_fel"):
+            with self.subTest(mode=mode):
+                _, context = playback_capabilities(mode)
+                self.assertIn("client_selected_audio_track_v1",
+                              context["deliveries"]["original_http"]["validated_claims"])
 
     def test_platform_name_does_not_claim_hardware_or_receiver_passthrough(self):
         for mode in ("auto", "hdr10", "dv", "p7_fel"):

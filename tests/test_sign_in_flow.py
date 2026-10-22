@@ -201,6 +201,8 @@ class SignInFlowTests(unittest.TestCase):
         self.app.client.select_profile.assert_called_once_with("saved", "new-proof")
 
     def test_valid_session_and_refresh_only_session_both_skip_login(self):
+        # A returning user has already answered the one-time display question.
+        self.settings["display_setup_done"] = "true"
         for access_token in ("access", None):
             with self.subTest(access_token=access_token):
                 self.app.store.update(access_token=access_token, refresh_token="refresh", profile_id="saved")
@@ -241,6 +243,68 @@ class SignInFlowTests(unittest.TestCase):
             with self.assertRaises(ApiError):
                 self.app._run()
         self.app.sign_in.assert_not_called()
+
+
+class DisplaySetupTests(unittest.TestCase):
+    """The one-time "What can this TV show?" question."""
+
+    def setUp(self):
+        # Same application double as the sign-in journeys.
+        SignInFlowTests.setUp(self)
+        self.app.addon.setSetting.side_effect = lambda key, value: self.settings.__setitem__(key, value)
+
+    def test_first_launch_asks_once_and_saves_the_choice(self):
+        self.app.dialog.select.return_value = 2  # 4K TV with Dolby Vision
+        self.app.ensure_display_setup()
+        self.assertEqual(self.settings["dv_mode"], "dv")
+        self.assertEqual(self.settings["display_setup_done"], "true")
+        self.app.ensure_display_setup()
+        self.app.dialog.select.assert_called_once()
+
+    def test_p7_fel_choice_selects_the_fel_mode(self):
+        self.app.dialog.select.return_value = 3
+        self.app.ensure_display_setup()
+        self.assertEqual(self.settings["dv_mode"], "p7_fel")
+
+    def test_backing_out_saves_nothing_and_asks_again_next_launch(self):
+        self.app.dialog.select.return_value = -1
+        self.app.ensure_display_setup()
+        self.assertNotIn("dv_mode", self.settings)
+        self.assertNotIn("display_setup_done", self.settings)
+        self.app.ensure_display_setup()
+        self.assertEqual(self.app.dialog.select.call_count, 2)
+
+    def test_decide_later_stops_asking_without_changing_the_mode(self):
+        self.app.dialog.select.return_value = len(application_module.Application.DISPLAY_CHOICES) - 1
+        self.app.ensure_display_setup()
+        self.assertNotIn("dv_mode", self.settings)
+        self.assertEqual(self.settings["display_setup_done"], "true")
+
+    def test_a_device_already_described_in_settings_is_not_asked(self):
+        for key, value in (("dv_mode", "hdr10"), ("max_resolution", "2160p")):
+            with self.subTest(setting=key):
+                self.settings.pop("display_setup_done", None)
+                self.settings.update({"dv_mode": "auto", "max_resolution": "auto", key: value})
+                self.app.dialog.select.reset_mock()
+                self.app.ensure_display_setup()
+                self.app.dialog.select.assert_not_called()
+                self.assertEqual(self.settings["display_setup_done"], "true")
+
+    def test_first_launch_reaches_home_after_the_question(self):
+        self.settings["server_url"] = ""
+        self.app.dialog.select.return_value = 1
+        self.app.choose_profile = MagicMock(return_value=True)
+
+        def signed_in():
+            self.app.client = MagicMock(server_url=BASE)
+            return True
+
+        self.app.sign_in = MagicMock(side_effect=signed_in)
+        with patch.object(application_module, "HomeWindow") as home:
+            home.return_value.result = None
+            self.app._run()
+        self.assertEqual(self.settings["dv_mode"], "hdr10")
+        home.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -406,5 +406,83 @@ class TransportTests(unittest.TestCase):
         self.assertNotIn("secret.example", str(error.exception))
 
 
+class DownloadTransport(Transport):
+    """A transport that also serves raw downloads, recorded like requests."""
+
+    def download(self, url, headers, limit):
+        self.calls.append(("DOWNLOAD", url, headers, limit))
+        if not self.responses:
+            raise AssertionError("Unexpected download: " + url)
+        value = self.responses.pop(0)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
+class DownloadTests(unittest.TestCase):
+    def client(self, transport, store=None, **kwargs):
+        return SiloClient(BASE, store if store is not None else credentials(), transport,
+                          clock=lambda: 100, **kwargs)
+
+    def test_download_returns_bytes_with_this_sign_in_and_profile_headers(self):
+        transport = DownloadTransport(response(b"1\n00:00:01,000 --> 00:00:02,000\nHi\n"))
+        data = self.client(transport).download("/api/v2/stream/s1/subtitles/2.srt?file_id=f", 1024)
+        self.assertTrue(data.startswith(b"1\n"))
+        method, url, headers, limit = transport.calls[0]
+        self.assertEqual(method, "DOWNLOAD")
+        self.assertEqual(urlsplit(url).hostname, "silo.example")
+        self.assertEqual(headers["Authorization"], "Bearer old-access")
+        self.assertEqual(headers["X-Profile-Id"], "p1")
+        self.assertEqual(headers["X-Profile-Token"], "proof")
+        self.assertEqual(limit, 1024)
+
+    def test_download_refuses_other_origins_before_any_http(self):
+        for url in ("https://evil.example/sub.srt", "//evil.example/sub.srt",
+                    "http://silo.example/sub.srt", "https://silo.example:8443/sub.srt",
+                    "https://user:pass@silo.example/sub.srt", "", "/sub.srt|X=1", "/a\r\nb"):
+            with self.subTest(url=url):
+                transport = DownloadTransport()
+                with self.assertRaises(ApiError):
+                    self.client(transport).download(url, 1024)
+                self.assertEqual(transport.calls, [])
+
+    def test_download_refreshes_once_on_401_then_retries_with_the_new_token(self):
+        transport = DownloadTransport(response(None, 401), response(tokens()), response(b"WEBVTT\n"))
+        data = self.client(transport).download("/api/v2/stream/s1/subtitles/2.vtt", 1024)
+        self.assertEqual(data, b"WEBVTT\n")
+        self.assertEqual([call[0] for call in transport.calls], ["DOWNLOAD", "POST", "DOWNLOAD"])
+        self.assertEqual(transport.calls[-1][2]["Authorization"], "Bearer new-access")
+
+    def test_download_errors_keep_the_status(self):
+        transport = DownloadTransport(response(None, 404))
+        with self.assertRaises(ApiError) as error:
+            self.client(transport).download("/api/v2/stream/s1/subtitles/9.srt", 1024)
+        self.assertEqual(error.exception.status, 404)
+
+    def test_transport_without_download_support_is_reported(self):
+        with self.assertRaises(ApiError) as error:
+            self.client(Transport()).download("/api/v2/stream/s1/subtitles/2.srt", 1024)
+        self.assertEqual(error.exception.code, "download_unsupported")
+
+    def test_urllib_download_enforces_the_size_limit(self):
+        class Body(io.BytesIO):
+            code = 200
+            headers = {}
+
+        transport = UrllibTransport()
+        with patch.object(transport.opener, "open", return_value=Body(b"x" * 11)):
+            with self.assertRaises(ApiError):
+                transport.download("https://silo.example/a", {}, 10)
+        with patch.object(transport.opener, "open", return_value=Body(b"x" * 10)):
+            self.assertEqual(transport.download("https://silo.example/a", {}, 10)[2], b"x" * 10)
+
+    def test_user_agent_names_the_add_on_and_can_carry_its_version(self):
+        transport = Transport(response({}), response({}))
+        self.client(transport).me()
+        self.client(transport, user_agent="SiloTheater/0.2.2").me()
+        self.assertEqual(transport.calls[0][2]["User-Agent"], "SiloTheater")
+        self.assertEqual(transport.calls[1][2]["User-Agent"], "SiloTheater/0.2.2")
+
+
 if __name__ == "__main__":
     unittest.main()

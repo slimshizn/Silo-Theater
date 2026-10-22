@@ -78,17 +78,38 @@ class UrllibTransport:
             raise ApiError(status, "The server returned an invalid JSON response.", "invalid_response") from exc
         return status, response_headers, decoded
 
+    def download(self, url, headers, limit):
+        """GET raw bytes, at most ``limit``; same no-redirect and error rules."""
+        req = Request(url, headers=headers, method="GET")
+        try:
+            response = self.opener.open(req, timeout=self.timeout)
+        except HTTPError as exc:
+            response = exc
+        except (URLError, OSError, TimeoutError) as exc:
+            raise ApiError(0, "Could not connect to the Silo server.", "connection_failed") from exc
+        try:
+            with response:
+                data = response.read(limit + 1)
+                status = response.code
+                response_headers = dict(response.headers)
+        except (OSError, TimeoutError) as exc:
+            raise ApiError(0, "The Silo server response was interrupted.", "connection_failed") from exc
+        if len(data) > limit:
+            raise ApiError(status, "The server response is too large.", "invalid_response")
+        return status, response_headers, data
+
 
 class SiloClient:
     AUTH_KEYS = ("access_token", "refresh_token", "expires_at", "user",
                  "profile_id", "profile_token", "profile_token_expires_at",
                  "temporary_session", "bound_profile_id", "session_expires_at", "auth_session_id")
 
-    def __init__(self, server_url, store, transport=None, clock=None):
+    def __init__(self, server_url, store, transport=None, clock=None, user_agent="SiloTheater"):
         self.server_url = normalize_server_url(server_url)
         self.store = store
         self.transport = transport or UrllibTransport()
         self._clock = clock or time.time
+        self.user_agent = str(user_agent)
         # Keep auth rotation shared across new clients for the same store,
         # without holding the storage/read lock during an HTTP refresh.
         guard = getattr(store, "_lock", None) or threading.RLock()
@@ -174,7 +195,7 @@ class SiloClient:
             return self.store.get("access_token") or ""
 
     def headers(self, authenticated=True, profile=True):
-        headers = {"Accept": "application/json", "User-Agent": "Silo-Kodi/0.1"}
+        headers = {"Accept": "application/json", "User-Agent": self.user_agent}
         if authenticated:
             token = self.current_token()
             if not token:
@@ -216,6 +237,37 @@ class SiloClient:
             code = str(problem.get("type", "")).rstrip("/").rsplit("/", 1)[-1]
             message = problem.get("detail") or problem.get("title") or "Silo returned HTTP {}.".format(status)
             raise ApiError(status, str(message), code, response_headers)
+        return data
+
+    def download(self, url, max_bytes, retry_auth=True):
+        """Fetch a server-issued URL as bytes with this sign-in's headers.
+
+        The credentials stay inside the add-on: callers save the bytes locally
+        and hand Kodi a file path, never a URL carrying Authorization headers.
+        Only this server's origin is accepted, and 401 refreshes once.
+        """
+        self._check_scope()
+        if not isinstance(url, str) or not url or any(char in url for char in ("|", "\\", "\r", "\n", "\t", "\x00")):
+            raise ApiError(0, "The server returned an invalid download URL.", "invalid_response")
+        target = urljoin(self.server_url + "/", url)
+        parts, server = urlsplit(target), urlsplit(self.server_url)
+        origin = lambda p: (p.scheme.lower(), p.hostname, p.port or (443 if p.scheme == "https" else 80))
+        if parts.scheme not in ("http", "https") or parts.username or parts.password or origin(parts) != origin(server):
+            raise ApiError(0, "Downloads are only accepted from this Silo server.", "invalid_response")
+        headers = self.headers()
+        headers["Accept"] = "*/*"
+        download = getattr(self.transport, "download", None)
+        if download is None:
+            raise ApiError(0, "This connection cannot download files.", "download_unsupported")
+        status, response_headers, data = download(target, headers, max_bytes)
+        self._check_scope()
+        if status == 401 and retry_auth and self.store.get("refresh_token"):
+            with self._lock:
+                if headers.get("Authorization") == "Bearer " + (self.store.get("access_token") or ""):
+                    self.refresh()
+            return self.download(url, max_bytes, retry_auth=False)
+        if not 200 <= status < 300:
+            raise ApiError(status, "Silo returned HTTP {}.".format(status), "download_failed", response_headers)
         return data
 
     def _save_tokens(self, tokens, method=None, reset_profile=False, session=None):

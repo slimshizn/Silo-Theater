@@ -79,6 +79,12 @@
         </setting>
       </group>
       <group id="3">
+        <setting id="display_setup_done" type="boolean" label="32011">
+          <level>0</level>
+          <visible>false</visible>
+          <default>false</default>
+          <control type="toggle" />
+        </setting>
         <setting id="auto_next" type="boolean" label="32017">
           <level>0</level>
           <visible>false</visible>
