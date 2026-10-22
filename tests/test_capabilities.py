@@ -45,6 +45,13 @@ class CapabilityTests(unittest.TestCase):
                 self.assertEqual(context["deliveries"]["original_http"]["validated_claims"],
                                  ["client_selected_audio_track_v1"])
 
+    def test_audio_selection_claim_can_be_withheld_without_touching_hdr_claims(self):
+        _, context = playback_capabilities("p7_fel", client_audio_selection=False)
+        claims = context["deliveries"]["original_http"]["validated_claims"]
+        self.assertEqual(claims, ["client_managed_dynamic_range_v1"])
+        _, context = playback_capabilities("auto", client_audio_selection=False)
+        self.assertEqual(context["deliveries"]["original_http"]["validated_claims"], [])
+
     def test_every_mode_claims_client_side_audio_track_selection(self):
         for mode in ("auto", "hdr10", "dv", "p7_fel"):
             with self.subTest(mode=mode):

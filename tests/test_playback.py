@@ -482,6 +482,7 @@ class ControllerTests(unittest.TestCase):
         state = SimpleNamespace(now=0.0, player=None, dialogs=[], subtitles=[], visibility=[], seeks=[],
                                 in_callback=False, logs=[], native_times=0,
                                 subtitle_streams=getattr(self, "subtitle_streams", []), subtitle_selected=[],
+                                audio_streams=getattr(self, "audio_streams", []), audio_selected=[],
                                 profile_dir=getattr(self, "profile_dir", None) or tempfile.mkdtemp())
         pending = list(events)
         polling_thread = threading.get_ident()
@@ -532,6 +533,12 @@ class ControllerTests(unittest.TestCase):
             def setSubtitleStream(self, index):
                 state.subtitle_selected.append(index)
 
+            def getAvailableAudioStreams(self):
+                return list(state.audio_streams)
+
+            def setAudioStream(self, index):
+                state.audio_selected.append(index)
+
         class Monitor:
             def waitForAbort(self, seconds):
                 # Yield to the real reporter thread; production Monitor does so.
@@ -573,8 +580,10 @@ class ControllerTests(unittest.TestCase):
             def setContentLookup(self, *args):
                 pass
 
+        windows = getattr(self, "platform_windows", False)
         xbmc = SimpleNamespace(Player=KodiPlayer, Monitor=Monitor,
-                               log=lambda message, level: state.logs.append(message), LOGWARNING=2, LOGINFO=1)
+                               log=lambda message, level: state.logs.append(message), LOGWARNING=2, LOGINFO=1,
+                               getCondVisibility=lambda name: windows and name == "System.Platform.Windows")
         xbmcgui = SimpleNamespace(ListItem=ListItem, Dialog=lambda: SimpleNamespace(ok=lambda *args: state.dialogs.append(args)))
         addon = SimpleNamespace(getSetting=lambda key: "", getAddonInfo=lambda key: "0.2.1")
         xbmcvfs = SimpleNamespace(translatePath=lambda path: state.profile_dir)
@@ -771,6 +780,41 @@ class ControllerTests(unittest.TestCase):
             del self.subtitle_streams
         self.assertEqual(state.subtitle_selected, [])
         self.assertEqual(state.visibility, [])
+
+
+    def audio_decision(self, index):
+        decision = playable_decision()
+        decision["playback_plan"]["selected_tracks"] = {"audio": {"id": "file:f:audio:%d" % index, "index": index}}
+        return decision
+
+    def start_claims(self, client):
+        body = next(body for _, path, body in client.calls if path == "/playback/start")
+        return body["client_playback_context"]["deliveries"]["original_http"]["validated_claims"]
+
+    def test_other_platforms_apply_the_planned_audio_track_and_claim_it(self):
+        self.audio_streams = ["eng", "fre"]
+        try:
+            client = FakeClient(self.audio_decision(1))
+            state = self.run_player(client, [(1, None), (2, "stop")], start=0)
+        finally:
+            del self.audio_streams
+        self.assertEqual(state.audio_selected, [1])
+        self.assertIn("client_selected_audio_track_v1", self.start_claims(client))
+
+    def test_windows_makes_no_startup_track_switch_and_does_not_claim_one(self):
+        self.audio_streams = ["eng", "fre"]
+        self.platform_windows = True
+        try:
+            client = FakeClient(self.audio_decision(1))
+            state = self.run_player(client, [(1, None), (2, "stop")], start=0)
+        finally:
+            del self.audio_streams, self.platform_windows
+        self.assertEqual(state.audio_selected, [])
+        self.assertNotIn("client_selected_audio_track_v1", self.start_claims(client))
+        self.assertTrue(any("startup_track_switch_skipped_windows" in line for line in state.logs))
+        # Playback and reporting otherwise proceed normally.
+        self.assertTrue(any(path.endswith("/progress") for _, path, _ in client.calls))
+        self.assertEqual(client.calls[-1][0], "DELETE")
 
 
 class SubtitleHelperTests(unittest.TestCase):

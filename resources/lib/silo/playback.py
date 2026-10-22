@@ -116,7 +116,7 @@ def kodi_media_url(server_url, stream):
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.2.2", options=None):
+    def __init__(self, client, mode="auto", version="0.2.3", options=None):
         self.client, self.mode, self.version = client, mode, version
         self.options = dict(options or {})
         # /api/v2 calls this installation_id, but it identifies the SERVER.
@@ -155,7 +155,8 @@ class PlaybackSession:
         if not profile_id:
             raise PlaybackError("Choose a profile before playing a title.")
         features = self._negotiate()
-        codecs, context = playback_capabilities(self.mode, self.version, self.options.get("max_resolution", "auto"))
+        codecs, context = playback_capabilities(self.mode, self.version, self.options.get("max_resolution", "auto"),
+                                                self.options.get("client_audio_selection", True))
         body = {
             "installation_id": self.installation_id,
             "protocol_version": 3, "client_features": features,
@@ -469,6 +470,14 @@ class PlaybackController:
         options = dict(read_options(self.addon) if options is None else options)
         self.last_result = None
         self.last_reporter = None
+        # On Windows, switching Kodi's audio stream the moment playback starts
+        # reopened the audio and decoder and left playback stuck. Make no
+        # startup track change there, and tell the server Kodi will not select
+        # tracks, so the plan keeps the file's default audio track.
+        condition = getattr(xbmc, "getCondVisibility", None)
+        on_windows = bool(condition and condition("System.Platform.Windows"))
+        if on_windows:
+            options["client_audio_selection"] = False
 
         class Player(xbmc.Player):
             # Kodi dispatches these asynchronously. Callbacks only change Python
@@ -582,7 +591,9 @@ class PlaybackController:
                 player.seekTime(start)
             stage = "track_setup"
             audio_index = (plan.get("selected_tracks", {}).get("audio") or {}).get("index")
-            if not player.finished and audio_index is not None:
+            if on_windows:
+                log_event("startup_track_switch_skipped_windows")
+            elif not player.finished and audio_index is not None:
                 streams = player.getAvailableAudioStreams()
                 if not player.finished and 0 <= audio_index < len(streams):
                     player.setAudioStream(audio_index)
