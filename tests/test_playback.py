@@ -545,13 +545,21 @@ class ResumeGuardTests(unittest.TestCase):
         self.assertTrue(guard.accept(180))
         self.assertTrue(guard.accept(0))  # Later intentional seeks may start over.
 
-    def test_seek_failure_times_out_without_confirming_zero(self):
+    def test_seek_failure_retries_then_gives_up_quietly(self):
         now = [0.0]
-        guard = ResumeGuard(180, clock=lambda: now[0])
-        now[0] = 10
-        with self.assertRaisesRegex(PlaybackError, "saved progress was kept"):
-            guard.accept(0)
-        self.assertFalse(guard.confirmed)
+        guard = ResumeGuard(180, clock=lambda: now[0], timeout=30)
+        self.assertFalse(guard.retry_due())
+        now[0] = 4
+        self.assertTrue(guard.retry_due())
+        self.assertFalse(guard.retry_due())
+        now[0] = 8
+        self.assertTrue(guard.retry_due())
+        now[0] = 20
+        self.assertFalse(guard.retry_due())
+        self.assertFalse(guard.accept(0))
+        now[0] = 30
+        self.assertTrue(guard.accept(0))
+        self.assertTrue(guard.gave_up)
 
     def test_restart_zero_needs_no_seek_confirmation(self):
         self.assertTrue(ResumeGuard(0).accept(0))
@@ -769,12 +777,41 @@ class ControllerTests(KodiHarness):
         self.assertFalse(any(path.endswith("/progress") for _, path, _ in client.calls))
         self.assertNotIn("position", client.calls[-1][2])
 
-    def test_failed_seek_times_out_with_no_zero_progress(self):
+    def test_failed_seek_retries_then_keeps_playing_from_where_kodi_is(self):
+        # Kodi stays at 0:00 (a converted stream not ready at the saved spot):
+        # the seek is retried twice, then playback continues with a notice
+        # instead of stopping with an error, and nothing is sent before that.
         client = FakeClient(playable_decision(source_start=180, player_start=180))
-        state = self.run_player(client, [(0, None)] * 50, start=180)
-        self.assertIn("saved progress was kept", state.dialogs[0][1])
-        self.assertFalse(any(path.endswith("/progress") for _, path, _ in client.calls))
-        self.assertNotIn("position", client.calls[-1][2])
+        state = self.run_player(client, [(0, None)] * 39 + [(0.3, None), (0.6, "stop")], start=180)
+        self.assertEqual(state.seeks, [180, 180, 180])
+        self.assertEqual(state.dialogs, [])
+        self.assertTrue(any("saved position" in notice for notice in state.notices))
+        self.assertTrue(any("resume_seek_gave_up" in line for line in state.logs))
+        samples = [body for _, path, body in client.calls if path.endswith("/progress")]
+        self.assertTrue(samples and all(sample["position"] < 1 for sample in samples))
+
+    def test_resume_opens_the_stream_at_the_saved_position(self):
+        client = FakeClient(playable_decision(source_start=180, player_start=180))
+        state = self.run_player(client, [(180.1, None), (180.6, "stop")], start=180)
+        self.assertEqual(state.listitem_props.get("StartOffset"), "180.000")
+        # This fake player starts at 0:00 whatever StartOffset says, so the add-on seeks once.
+        self.assertEqual(state.seeks, [180])
+
+    def test_no_seek_when_kodi_already_started_at_the_saved_position(self):
+        from silo.playback import player_near
+
+        class Player:
+            def __init__(self, at):
+                self.at = at
+
+            def getTime(self):
+                if self.at is None:
+                    raise RuntimeError("not playing")
+                return self.at
+
+        self.assertTrue(player_near(Player(180.4), 180))
+        self.assertFalse(player_near(Player(0.0), 180))
+        self.assertFalse(player_near(Player(None), 180))
 
     def test_pause_resume_are_reported_without_waiting_for_heartbeat(self):
         client = FakeClient()
@@ -1607,7 +1644,9 @@ class ConvertedControllerTests(KodiHarness):
         self.assertEqual(body["quality_preference"], "1080p-medium")
         self.assertEqual(body["position_seconds"], 10)
         self.assertEqual(len(state.plays), 2)
-        self.assertEqual(state.seeks, [10])
+        # The new stream opens at 10 s (StartOffset); Kodi is already there, so no extra seek.
+        self.assertEqual(state.listitem_props.get("StartOffset"), "10.000")
+        self.assertEqual(state.seeks, [])
         self.assertEqual(self.fake_extras.plans[-1][1], "1080p-medium")
         self.assertEqual(self.fake_extras.plans[-1][0]["plan_id"], "plan:transcode-0002")
         self.assertEqual(client.calls[-1][0], "DELETE")

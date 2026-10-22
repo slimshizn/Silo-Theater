@@ -16,6 +16,16 @@ from .storage import StorageError
 
 # How long fullscreen video must be gone before playback stops (see the poll loop).
 LEFT_FULLSCREEN_SECONDS = 1.0
+# How long Kodi has to reach a saved position; converted streams start converting there on demand.
+RESUME_TIMEOUT, RESUME_TIMEOUT_CONVERTED = 10, 30
+
+
+def player_near(player, target):
+    """Whether Kodi already started at ``target`` (StartOffset), so no seek is needed."""
+    try:
+        return abs(float(player.getTime()) - target) <= max(1.0, min(3.0, target / 10))
+    except (RuntimeError, TypeError, ValueError):
+        return False
 
 
 class PlaybackError(Exception):
@@ -165,7 +175,7 @@ def _bandwidth_cap(options):
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.5.1", options=None):
+    def __init__(self, client, mode="auto", version="0.5.2", options=None):
         self.client, self.mode, self.version = client, mode, version
         self.options = dict(options or {})
         # /api/v2 calls this installation_id, but it identifies the SERVER.
@@ -455,7 +465,16 @@ def select_file(item):
 
 
 class ResumeGuard:
-    """Do not persist pre-seek zeroes while Kodi restores a saved position."""
+    """Do not persist pre-seek zeroes while Kodi restores a saved position.
+
+    Converted streams can take a while to reach a far position, because the
+    server starts converting there only when asked. The guard asks for the
+    seek again (``retry_due``) and, if Kodi never gets there, gives up quietly
+    so playback continues from wherever it is (``gave_up``) instead of
+    stopping with an error.
+    """
+
+    RETRY_SECONDS = (4.0, 8.0)
 
     def __init__(self, target, clock=None, timeout=10):
         self.target = _position(target)
@@ -463,6 +482,8 @@ class ResumeGuard:
         self.started = self.clock()
         self.timeout = timeout
         self.confirmed = self.target == 0
+        self.gave_up = False
+        self.retries = 0
 
     def accept(self, position):
         position = _position(position)
@@ -474,8 +495,18 @@ class ResumeGuard:
             self.confirmed = True
             return True
         if elapsed >= self.timeout:
-            raise PlaybackError("Kodi could not restore the saved playback position. Your saved progress was kept.")
+            self.confirmed = self.gave_up = True
+            return True
         return False
+
+    def retry_due(self):
+        """True once per retry point while the saved position is still not reached."""
+        if self.confirmed or self.retries >= len(self.RETRY_SECONDS):
+            return False
+        if self.clock() - self.started < self.RETRY_SECONDS[self.retries]:
+            return False
+        self.retries += 1
+        return True
 
 
 class StallRecovery:
@@ -918,6 +949,12 @@ class PlaybackController:
             if used_adaptive:
                 path, _, headers = path.partition("|")
             listitem = xbmcgui.ListItem(label=item.get("title", "Silo"), path=path)
+            planned_start = _number(plan["timeline"]["player_start_seconds"], field="timeline.player_start_seconds")
+            if planned_start > 0:
+                # Kodi opens the stream at the saved position instead of playing
+                # from 0:00 and seeking afterwards, which a converted stream may
+                # not finish before the resume check gives up.
+                listitem.setProperty("StartOffset", "{:.3f}".format(planned_start))
             tag = listitem.getVideoInfoTag()
             tag.setTitle(item.get("title", "Silo"))
             tag.setPlot(item.get("overview", ""))
@@ -958,9 +995,9 @@ class PlaybackController:
                 return "finished"
             log_event("av_started")
             start = _number(plan["timeline"]["player_start_seconds"], field="timeline.player_start_seconds")
-            guard = ResumeGuard(start)
+            guard = ResumeGuard(start, timeout=RESUME_TIMEOUT_CONVERTED if converted else RESUME_TIMEOUT)
             stage = "resume_seek"
-            if start:
+            if start and not player_near(player, start):
                 player.seekTime(start)
             stage = "track_setup"
             audio_index = (plan.get("selected_tracks", {}).get("audio") or {}).get("index")
@@ -1114,6 +1151,7 @@ class PlaybackController:
             # video keeps playing, and this add-on's screens stay frozen until
             # it ends. Like the Silo apps, leaving fullscreen video stops it.
             stop_on_back = options.get("stop_on_back", True)
+            resume_notice_shown = False
             fullscreen_seen, away_since = False, None
             while not player.finished:
                 if monitor.waitForAbort(0.25):
@@ -1153,7 +1191,15 @@ class PlaybackController:
                 if player.finished:
                     break
                 if not guard.accept(current):
+                    if guard.retry_due() and not player.finished:
+                        log_event("resume_seek_retry", current)
+                        player.seekTime(guard.target)
                     continue
+                if guard.gave_up and not resume_notice_shown:
+                    resume_notice_shown = True
+                    log_event("resume_seek_gave_up", current)
+                    xbmcgui.Dialog().notification("Silo", "Could not jump to your saved position; playing from here.",
+                                                  time=4000, sound=False)
                 offset = session.plan["timeline"]["timeline_offset_seconds"]
                 latest_sample = (_position(current), bool(player.paused), _number(offset, signed=True))
                 reporter.submit(*latest_sample)
