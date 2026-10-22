@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <addons>
-  <addon id="plugin.video.silotheater" name="Founders Theater Widgets" version="1.0.1" provider-name="slimshizn">
+  <addon id="plugin.video.silotheater" name="Founders Theater Widgets" version="1.0.2" provider-name="slimshizn">
     <requires>
       <import addon="xbmc.python" version="3.0.1" />
-      <import addon="script.silo" version="0.5.4" />
+      <import addon="script.silo" version="0.5.5" />
     </requires>
     <extension point="xbmc.python.pluginsource" library="default.py">
       <provides>video</provides>
@@ -13,9 +13,6 @@
       <description lang="en_GB">Shows your Silo home rows, Watchlist and Favorites as video folders that Kodi skins can use as home-screen widgets. Selecting a title plays it in Founders Theater, which must be installed and signed in. A community add-on, not an official Silo app.</description>
       <license>AGPL-3.0-or-later</license>
       <platform>all</platform>
-      <assets>
-        <icon>icon.png</icon>
-      </assets>
     </extension>
   </addon>
   <addon id="repository.silo.theater" name="Founders Theater Repository" version="1.0.2" provider-name="slimshizn">
@@ -37,7 +34,7 @@
       <platform>all</platform>
     </extension>
   </addon>
-  <addon id="script.silo" name="Founders Theater - Silo for Kodi" version="0.5.4" provider-name="slimshizn">
+  <addon id="script.silo" name="Founders Theater - Silo for Kodi" version="0.5.5" provider-name="slimshizn">
     <requires>
       <import addon="xbmc.python" version="3.0.1" />
       <import addon="xbmc.gui" version="5.17.0" />
@@ -51,9 +48,6 @@
       <disclaimer lang="en_GB">Founders Theater is not made or endorsed by the Silo project. Select HDR and Dolby Vision settings that your device and display support.</disclaimer>
       <license>AGPL-3.0-or-later</license>
       <platform>all</platform>
-      <assets>
-        <icon>resources/icon.png</icon>
-      </assets>
     </extension>
   </addon>
 </addons>
