@@ -19,7 +19,7 @@
       <platform>all</platform>
     </extension>
   </addon>
-  <addon id="script.silo" name="Silo" version="0.1.1" provider-name="slimshizn">
+  <addon id="script.silo" name="Silo" version="0.2.0" provider-name="slimshizn">
     <requires>
       <import addon="xbmc.python" version="3.0.1" />
       <import addon="xbmc.gui" version="5.17.0" />
@@ -29,8 +29,8 @@
     </extension>
     <extension point="xbmc.addon.metadata">
       <summary lang="en_GB">A native Silo experience for Kodi</summary>
-      <description lang="en_GB">Browse and play your Silo library using the native Silo API. This early development build establishes the client foundation.</description>
-      <disclaimer lang="en_GB">Early development build. Device playback capabilities require verification on your hardware.</disclaimer>
+      <description lang="en_GB">Browse your Silo library, choose a media file and resume movies and episodes from your saved position. Customize playback and browsing for your Kodi device.</description>
+      <disclaimer lang="en_GB">Select HDR and Dolby Vision settings that your device and display support.</disclaimer>
       <license>AGPL-3.0-or-later</license>
       <platform>all</platform>
     </extension>
