@@ -184,9 +184,11 @@ class SignInFlowTests(unittest.TestCase):
         self.assertTrue(self.app.choose_profile())
         self.app.dialog.select.assert_not_called()
         self.app.client.select_profile.assert_called_with("saved", None)
-        self.app.dialog.select.return_value = 0
-        self.assertTrue(self.app.choose_profile(force=True))
-        self.app.dialog.select.assert_called_once()
+        picker = types.SimpleNamespace(pick_profile=MagicMock(return_value=0))
+        with patch.dict(sys.modules, {application_module.__package__ + ".ui_people": picker}):
+            self.assertTrue(self.app.choose_profile(force=True))
+        picker.pick_profile.assert_called_once()
+        self.assertEqual(picker.pick_profile.call_args.args[2], 1)  # the saved profile is preselected
         self.app.client.select_profile.assert_called_with("first", None)
 
     def test_saved_locked_profile_still_requires_pin(self):

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="script.silo" name="Silo" version="0.2.7" provider-name="slimshizn">
+<addon id="script.silo" name="Silo Theater" version="0.3.0" provider-name="slimshizn">
   <requires>
     <import addon="xbmc.python" version="3.0.1" />
     <import addon="xbmc.gui" version="5.17.0" />
@@ -8,10 +8,13 @@
     <provides>video</provides>
   </extension>
   <extension point="xbmc.addon.metadata">
-    <summary lang="en_GB">A native Silo experience for Kodi</summary>
-    <description lang="en_GB">Browse your Silo library, choose a media file and resume movies and episodes from your saved position. Customize playback and browsing for your Kodi device.</description>
-    <disclaimer lang="en_GB">Select HDR and Dolby Vision settings that your device and display support.</disclaimer>
+    <summary lang="en_GB">A community Kodi add-on for Silo</summary>
+    <description lang="en_GB">Silo Theater is a community add-on for Silo media servers, not an official Silo app. Browse your Silo library with a TV interface modeled on the Silo Android TV app, choose a media file and resume movies and episodes from your saved position.</description>
+    <disclaimer lang="en_GB">Silo Theater is not made or endorsed by the Silo project. Select HDR and Dolby Vision settings that your device and display support.</disclaimer>
     <license>AGPL-3.0-or-later</license>
     <platform>all</platform>
+    <assets>
+      <icon>resources/icon.png</icon>
+    </assets>
   </extension>
 </addon>

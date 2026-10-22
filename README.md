@@ -1,13 +1,16 @@
 # Silo Theater
 
-Silo Theater brings your Silo media library to **Kodi 21 or newer**, with a fullscreen browsing interface and Kodi's built-in video player.
+Silo Theater brings your Silo media library to **Kodi 21 or newer**, with a TV interface modeled on the Silo Android TV app and Kodi's built-in video player.
+
+Silo Theater is a community project. It is not an official Silo app and is not made or endorsed by the Silo team. The Silo name and logo are trademarks of Silo Media L.L.C. and are not covered by this project's license.
 
 ## Features
 
 - Sign in with an activation code or username and password.
 - Choose household profiles, including PIN-protected profiles.
-- Browse home hubs and libraries, search, filter, sort and load more results.
-- Open title details and navigate series, seasons and episodes.
+- Home rows in your server's order, with a hero that follows the title you focus.
+- Movies and Series grids with library and sort choices, and search.
+- Title details with seasons, an episode rail, cast and related titles.
 - Select a movie or episode's media file by filename, edition and format.
 - Resume movies and episodes from their saved position and sync progress with Silo.
 - Customize resume behavior, file selection, browsing and playback preferences.
@@ -18,13 +21,15 @@ Silo Theater brings your Silo media library to **Kodi 21 or newer**, with a full
 1. Open **Settings → File manager → Add source** and enter `https://slimshizn.github.io/Silo-Theater/`. Name the source **Silo Theater**.
 2. Open **Add-ons → Install from zip file → Silo Theater**. Enable installation from unknown sources if prompted.
 3. Select **repository.silo.theater-1.0.1.zip**.
-4. Open **Install from repository → Silo Theater Repository**, find **Silo**, and select **Install**.
+4. Open **Install from repository → Silo Theater Repository**, find **Silo Theater**, and select **Install**.
 
-Open **Silo** in Kodi and enter your server URL and Silo account username and password on the sign-in screen. Native Silo code sign-in is also available when your server supports it. Valid sessions and your last profile are reused on later launches; locked profiles still require their PIN. Server URLs with a reverse-proxy path prefix are supported.
+Open **Silo Theater** in Kodi and enter your server URL and Silo account username and password on the sign-in screen. Native Silo code sign-in is also available when your server supports it. Valid sessions and your last profile are reused on later launches; locked profiles still require their PIN. Server URLs with a reverse-proxy path prefix are supported.
 
 You can also [download the repository installer](https://slimshizn.github.io/Silo-Theater/repository.silo.theater-1.0.1.zip) in a browser and transfer it to your Kodi device.
 
-On a movie or episode's details screen, the version shown next to **File** is the one that plays; open **File** only to choose a different version. **Subtitles** lets you pick a subtitle track, or Off, before you press play. **Play** follows your resume preference; **Resume** continues from the saved position, and **Play from start** restarts the selected file. Resume points belong to your selected Silo profile.
+On a movie or episode's details screen, **Play** follows your resume preference and shows the resume time when there is one; the round **Start over** button restarts the title. The round **Version** button appears when a title has more than one file and **Subtitles** lets you pick a track, or Off, before you press play; the line under the buttons shows the current choice. A series page plays its next episode directly. Resume points belong to your selected Silo profile.
+
+Text uses your Kodi skin's font, because Kodi add-ons cannot bring their own.
 
 ## Build from source
 
@@ -36,11 +41,11 @@ make build
 make repository
 ```
 
-`make build` creates `dist/script.silo-0.2.7.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
+`make build` creates `dist/script.silo-0.3.0.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
-Version **0.2.7** supports **original HTTP direct play**. Titles that require remuxing or transcoding may be refused. Auto-next, a custom player overlay and automatic quality switching are not available.
+Version **0.3.0** supports **original HTTP direct play**. Titles that require remuxing or transcoding may be refused. Auto-next, a custom player overlay and automatic quality switching are not available.
 
 The first time Silo reaches your library it asks **What can this TV show?** and sets the display capability from your answer. Until a device is described, Silo declares SDR with a 1080p ceiling, so HDR and 4K titles are refused with a message that names the setting to change. You can change the answer later under **Settings → Playback → HDR and Dolby Vision capability** and **Maximum video resolution**. Select HDR10 or Dolby Vision only for a compatible device and display. Select **Dolby Vision P7 FEL** only when your hardware, firmware and Kodi build support full enhancement-layer decoding.
 

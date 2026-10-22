@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Device-code sign-in. ui_people.CodeScreen shows it modelessly while the script polls.
+     silo.code.N holds character N of the code and silo.code.N.gap marks a separator after it;
+     the grouplist centres the visible tiles. -->
+<window type="dialog">
+  <defaultcontrol always="true">400</defaultcontrol>
+  <coordinates><system>1</system><width>1920</width><height>1080</height></coordinates>
+  <controls>
+    <control type="image"><left>0</left><top>0</top><width>1920</width><height>1080</height><texture colordiffuse="FF000000">white.png</texture></control>
+    <control type="image"><left>480</left><top>270</top><width>1440</width><height>810</height><aspectratio>stretch</aspectratio><texture>brand_light.png</texture></control>
+    <control type="image"><left>0</left><top>0</top><width>960</width><height>1080</height><texture colordiffuse="FF000000">scrim_left.png</texture></control>
+    <control type="image"><left>90</left><top>60</top><width>100</width><height>52</height><aspectratio>keep</aspectratio><texture>silo_wordmark.png</texture></control>
+    <control type="label"><left>214</left><top>60</top><width>400</width><height>52</height><aligny>center</aligny><font>font36_title</font><textcolor>FFEDEDED</textcolor><label>Theater</label></control>
+
+    <control type="label"><left>90</left><top>330</top><width>900</width><height>80</height><aligny>center</aligny><font>font52_title</font><textcolor>FFEDEDED</textcolor><label>Sign in with a code</label></control>
+    <control type="label"><left>90</left><top>432</top><width>900</width><height>44</height><aligny>center</aligny><font>font27</font><textcolor>BFEDEDED</textcolor><label>On your phone or computer, open</label></control>
+    <control type="label"><left>90</left><top>484</top><width>900</width><height>52</height><aligny>center</aligny><font>font30_title</font><textcolor>FFEDEDED</textcolor><label>$INFO[Window.Property(silo.code_url)]</label><scroll>true</scroll></control>
+    <control type="textbox"><left>90</left><top>544</top><width>900</width><height>96</height><font>font27</font><textcolor>BFEDEDED</textcolor><label>and enter this code. This screen continues automatically.</label></control>
+
+    <control type="group">
+      <left>1190</left><top>345</top>
+      <control type="image"><left>0</left><top>0</top><width>640</width><height>390</height><texture border="42" colordiffuse="FF1F1F1F">glass.png</texture></control>
+      <control type="grouplist">
+        <left>52</left><top>52</top><width>536</width><height>84</height>
+        <orientation>horizontal</orientation><align>center</align><itemgap>4</itemgap><usecontrolcoords>false</usecontrolcoords>
+        <visible>!String.IsEmpty(Window.Property(silo.code_tiles))</visible>
+          <control type="group"><width>56</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.0))</visible>
+            <control type="image"><left>0</left><top>0</top><width>56</width><height>84</height><texture border="16" colordiffuse="1FFFFFFF">round16.png</texture></control>
+            <control type="label"><left>0</left><top>0</top><width>56</width><height>84</height><align>center</align><aligny>center</aligny><font>font_MainMenu</font><textcolor>FFEDEDED</textcolor><label>$INFO[Window.Property(silo.code.0)]</label></control>
+          </control>
+          <control type="group"><width>12</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.0.gap))</visible></control>
+          <control type="group"><width>56</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.1))</visible>
+            <control type="image"><left>0</left><top>0</top><width>56</width><height>84</height><texture border="16" colordiffuse="1FFFFFFF">round16.png</texture></control>
+            <control type="label"><left>0</left><top>0</top><width>56</width><height>84</height><align>center</align><aligny>center</aligny><font>font_MainMenu</font><textcolor>FFEDEDED</textcolor><label>$INFO[Window.Property(silo.code.1)]</label></control>
+          </control>
+          <control type="group"><width>12</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.1.gap))</visible></control>
+          <control type="group"><width>56</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.2))</visible>
+            <control type="image"><left>0</left><top>0</top><width>56</width><height>84</height><texture border="16" colordiffuse="1FFFFFFF">round16.png</texture></control>
+            <control type="label"><left>0</left><top>0</top><width>56</width><height>84</height><align>center</align><aligny>center</aligny><font>font_MainMenu</font><textcolor>FFEDEDED</textcolor><label>$INFO[Window.Property(silo.code.2)]</label></control>
+          </control>
+          <control type="group"><width>12</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.2.gap))</visible></control>
+          <control type="group"><width>56</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.3))</visible>
+            <control type="image"><left>0</left><top>0</top><width>56</width><height>84</height><texture border="16" colordiffuse="1FFFFFFF">round16.png</texture></control>
+            <control type="label"><left>0</left><top>0</top><width>56</width><height>84</height><align>center</align><aligny>center</aligny><font>font_MainMenu</font><textcolor>FFEDEDED</textcolor><label>$INFO[Window.Property(silo.code.3)]</label></control>
+          </control>
+          <control type="group"><width>12</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.3.gap))</visible></control>
+          <control type="group"><width>56</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.4))</visible>
+            <control type="image"><left>0</left><top>0</top><width>56</width><height>84</height><texture border="16" colordiffuse="1FFFFFFF">round16.png</texture></control>
+            <control type="label"><left>0</left><top>0</top><width>56</width><height>84</height><align>center</align><aligny>center</aligny><font>font_MainMenu</font><textcolor>FFEDEDED</textcolor><label>$INFO[Window.Property(silo.code.4)]</label></control>
+          </control>
+          <control type="group"><width>12</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.4.gap))</visible></control>
+          <control type="group"><width>56</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.5))</visible>
+            <control type="image"><left>0</left><top>0</top><width>56</width><height>84</height><texture border="16" colordiffuse="1FFFFFFF">round16.png</texture></control>
+            <control type="label"><left>0</left><top>0</top><width>56</width><height>84</height><align>center</align><aligny>center</aligny><font>font_MainMenu</font><textcolor>FFEDEDED</textcolor><label>$INFO[Window.Property(silo.code.5)]</label></control>
+          </control>
+          <control type="group"><width>12</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.5.gap))</visible></control>
+          <control type="group"><width>56</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.6))</visible>
+            <control type="image"><left>0</left><top>0</top><width>56</width><height>84</height><texture border="16" colordiffuse="1FFFFFFF">round16.png</texture></control>
+            <control type="label"><left>0</left><top>0</top><width>56</width><height>84</height><align>center</align><aligny>center</aligny><font>font_MainMenu</font><textcolor>FFEDEDED</textcolor><label>$INFO[Window.Property(silo.code.6)]</label></control>
+          </control>
+          <control type="group"><width>12</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.6.gap))</visible></control>
+          <control type="group"><width>56</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.7))</visible>
+            <control type="image"><left>0</left><top>0</top><width>56</width><height>84</height><texture border="16" colordiffuse="1FFFFFFF">round16.png</texture></control>
+            <control type="label"><left>0</left><top>0</top><width>56</width><height>84</height><align>center</align><aligny>center</aligny><font>font_MainMenu</font><textcolor>FFEDEDED</textcolor><label>$INFO[Window.Property(silo.code.7)]</label></control>
+          </control>
+          <control type="group"><width>12</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.7.gap))</visible></control>
+          <control type="group"><width>56</width><height>84</height><visible>!String.IsEmpty(Window.Property(silo.code.8))</visible>
+            <control type="image"><left>0</left><top>0</top><width>56</width><height>84</height><texture border="16" colordiffuse="1FFFFFFF">round16.png</texture></control>
+            <control type="label"><left>0</left><top>0</top><width>56</width><height>84</height><align>center</align><aligny>center</aligny><font>font_MainMenu</font><textcolor>FFEDEDED</textcolor><label>$INFO[Window.Property(silo.code.8)]</label></control>
+          </control>
+      </control>
+      <control type="label"><left>52</left><top>52</top><width>536</width><height>84</height><align>center</align><aligny>center</aligny><font>font_MainMenu</font><textcolor>FFEDEDED</textcolor><label>$INFO[Window.Property(silo.code)]</label><visible>String.IsEmpty(Window.Property(silo.code_tiles))</visible></control>
+      <control type="label"><left>52</left><top>164</top><width>300</width><height>34</height><aligny>center</aligny><font>font12</font><textcolor>FFEDEDED</textcolor><label>$INFO[Window.Property(silo.code_status)]</label></control>
+      <control type="label"><left>288</left><top>164</top><width>300</width><height>34</height><align>right</align><aligny>center</aligny><font>font12</font><textcolor>9EEDEDED</textcolor><label>$INFO[Window.Property(silo.code_expiry)]</label></control>
+      <control type="progress" id="310">
+        <left>52</left><top>212</top><width>536</width><height>6</height>
+        <texturebg colordiffuse="33FFFFFF">white.png</texturebg>
+        <lefttexture></lefttexture>
+        <midtexture colordiffuse="FFEDEDED">white.png</midtexture>
+        <righttexture></righttexture>
+      </control>
+      <control type="button" id="400">
+        <left>52</left><top>262</top><width>220</width><height>76</height>
+        <label>Cancel</label><font>font25_title</font><align>center</align><aligny>center</aligny>
+        <textcolor>FFEDEDED</textcolor><focusedcolor>FF000000</focusedcolor>
+        <texturefocus border="38" colordiffuse="FFEDEDED">pill76.png</texturefocus>
+        <texturenofocus border="38">pill76_idle.png</texturenofocus>
+        <onleft>400</onleft><onright>400</onright><onup>400</onup><ondown>400</ondown>
+      </control>
+    </control>
+
+    <control type="label"><left>90</left><top>990</top><width>1400</width><height>30</height><aligny>center</aligny><font>font10</font><textcolor>80EDEDED</textcolor><label>Silo Theater is a community add-on for Silo, not an official Silo app.</label></control>
+  </controls>
+</window>

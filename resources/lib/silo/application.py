@@ -15,6 +15,7 @@ from .api import ApiError, SiloClient
 from .auth import AuthController, DeviceAuthCancelled, DeviceAuthExpired, NATIVE_PROVIDER_ID
 from .media import available_versions, default_version, format_time, is_multipart, resume_position, version_label, version_name
 from .playback import PlaybackController
+from .present import avatar_image, video_items
 from .settings import read_options
 from .storage import SessionStore, StorageError
 from .ui import DetailsWindow, HomeWindow
@@ -28,8 +29,9 @@ class Application:
         self.store = None
         self.client = None
         self.profile_name = ""
+        self.profile_avatar = ""
         self.server_name = ""
-        self.browse = None
+        self._libraries = None
 
     def run(self):
         try:
@@ -240,19 +242,19 @@ class Application:
         return False
 
     def device_sign_in(self, auth):
-        progress = xbmcgui.DialogProgress()
-        started = [time.monotonic(), 0, ""]
+        from .ui_people import CodeScreen
+
+        screen = CodeScreen(self.addon.getAddonInfo("path"))
+        started = [time.monotonic(), 0]
 
         def show_code(response):
             expires = max(1, int(response.get("expires_in", 600)))
-            started[:] = [time.monotonic(), expires,
-                          "Open {} on another device.\n\nEnter code: {}".format(
-                              response.get("verification_uri") or response.get("verification_url")
-                              or self.client.server_url + "/activate", response["user_code"])]
-            progress.create("Sign in to Silo", started[2])
+            started[:] = [time.monotonic(), expires]
+            screen.open(response.get("verification_uri") or response.get("verification_url")
+                        or self.client.server_url + "/activate", response["user_code"], expires)
 
         def cancelled():
-            return self.monitor.abortRequested() or progress.iscanceled()
+            return self.monitor.abortRequested() or screen.cancelled()
 
         def wait(seconds):
             deadline = time.monotonic() + seconds
@@ -260,8 +262,7 @@ class Application:
                 if cancelled() or self.monitor.waitForAbort(min(0.2, max(0, deadline - time.monotonic()))):
                     return True
                 if started[1]:
-                    elapsed = time.monotonic() - started[0]
-                    progress.update(min(99, int(100 * elapsed / started[1])), started[2])
+                    screen.update((time.monotonic() - started[0]) / started[1])
             return False
 
         try:
@@ -269,7 +270,7 @@ class Application:
             self.store.set("auth_method", "device")
             return True
         finally:
-            progress.close()
+            screen.close()
 
     def choose_profile(self, force=False):
         if self.store.get("temporary_session"):
@@ -288,11 +289,15 @@ class Application:
         saved_exists = any(str(profile["id"]) == saved for profile in profiles)
         if saved_exists and not force:
             selected = preselect
+        elif len(profiles) == 1:
+            selected = 0
         else:
-            selected = 0 if len(profiles) == 1 else self.dialog.select(
-                "Who's watching?", [str(profile["name"]) + ("  ·  PIN" if profile.get("has_pin") else "")
-                                   for profile in profiles], preselect=preselect)
-        if selected < 0:
+            from .ui_people import pick_profile
+
+            account = self.store.get("login_username", "") if self.store.get("login_username_server") == (
+                self.client.server_url if self.client is not None else None) else ""
+            selected = pick_profile(self.addon.getAddonInfo("path"), profiles, preselect, account)
+        if not isinstance(selected, int) or not 0 <= selected < len(profiles):
             return False
         profile = profiles[selected]
         token = None
@@ -312,6 +317,8 @@ class Application:
             token = verification["profile_token"]
         self.client.select_profile(profile["id"], token)
         self.profile_name = str(profile["name"])
+        self.profile_avatar = avatar_image(profile.get("avatar_url"))
+        self._libraries = None  # Library access differs per profile.
         return True
 
     def guard(self, callback):
@@ -334,76 +341,51 @@ class Application:
         else:
             self.dialog.ok("Silo", exc.message or "The server could not complete the request.")
 
-    def home(self, window):
-        response = self.client.hubs()
-        sections = response.get("sections", [])
-        self.browse = None
-        first = next((section for section in sections if section.get("items")), None)
-        window.display("Home", sections, first.get("items", []) if first else [],
-                       first["title"] if first else "Your Silo library")
+    def home_sections(self):
+        """Home rows in server order, with only video cards and no empty rows."""
+        result = []
+        for section in self.client.hubs().get("sections", []):
+            items = video_items(section.get("items"))
+            if items:
+                result.append(dict(section, items=items))
+        return result
 
-    def show_section(self, window, section):
-        if "library" in section:
-            params = dict(self.browse["params"] if self.browse else {})
-            params["library_id"] = section["id"]
-            self.browse = {"heading": section["title"], "sections": window.sections, "params": params}
-            self._browse_page(window)
-            return
-        self.browse = {"heading": section["title"], "sections": window.sections,
-                       "params": {"source": "section", "scope": "home", "section_id": section["id"]}}
-        self._browse_page(window)
+    LIBRARY_KINDS = {"movie": ("movies", "mixed"), "series": ("series", "mixed")}
 
-    def search(self, window):
-        query = self.dialog.input("Search Silo", type=xbmcgui.INPUT_ALPHANUM)
-        if not query.strip():
-            return
-        selected = self.dialog.select("Search in", ["Movies and TV series", "Movies", "TV series", "Episodes"])
-        if selected < 0:
-            return
-        media_type = ("video", "movie", "series", "episode")[selected]
-        self.browse = {"heading": "Search: {}".format(query.strip()), "sections": [],
-                       "params": {"q": query.strip(), "type": media_type}}
-        self._browse_page(window)
+    def video_libraries(self, kind):
+        if self._libraries is None:
+            self._libraries = [library for library in self.client.libraries().get("items", [])
+                               if isinstance(library, dict) and library.get("id") is not None]
+        return [library for library in self._libraries if library.get("type") in self.LIBRARY_KINDS.get(kind, ())]
 
-    def libraries(self, window):
-        libraries = [library for library in self.client.libraries().get("items", [])
-                     if library.get("type") in ("movies", "series", "mixed")]
-        if not libraries:
-            self.dialog.ok("Silo libraries", "No video libraries are available for this profile.")
-            return
-        selected = self.dialog.select("Video libraries", [str(library["name"]) for library in libraries])
-        if selected < 0:
-            return
-        library = libraries[selected]
-        selected = self.dialog.select("Show", ["Movies and TV series", "Movies", "TV series", "Episodes"])
-        if selected < 0:
-            return
-        media_type = ("video", "movie", "series", "episode")[selected]
-        selected = self.dialog.select("Browse order", ["Title A–Z", "Recently added", "Newest releases", "Highest rating"])
-        if selected < 0:
-            return
-        sections = [{"id": entry["id"], "title": entry["name"], "library": entry} for entry in libraries]
-        self.browse = {"heading": library["name"], "sections": sections,
-                       "params": {"library_id": library["id"], "type": media_type,
-                                  "sort": ("title", "-added_at", "-release_date", "-rating")[selected]}}
-        self._browse_page(window)
-
-    def _browse_page(self, window, cursor=None):
-        state = self.browse
-        params = dict(state["params"], limit=self.options()["page_size"])
+    def browse(self, params, cursor=None):
+        """One /catalog page: items, the next cursor when there is more, and the total."""
+        query = dict(params, limit=self.options()["page_size"])
         if cursor:
-            params["cursor"] = cursor
-        response = self.client.items(**params)
+            query["cursor"] = cursor
+        response = self.client.items(**query)
         page = response.get("page") or {}
-        state["next_cursor"] = page.get("next_cursor") if page.get("has_more") else None
-        count = response.get("total")
-        subtitle = "{} titles".format(count) if count is not None else ""
-        window.display(state["heading"], state["sections"], response.get("items", []),
-                       subtitle, bool(state["next_cursor"]))
+        return {"items": video_items(response.get("items")),
+                "next_cursor": page.get("next_cursor") if page.get("has_more") else None,
+                "total": response.get("total")}
 
-    def next_page(self, window):
-        if self.browse and self.browse.get("next_cursor"):
-            self._browse_page(window, self.browse["next_cursor"])
+    def episodes(self, season):
+        response = self.client.episodes(season["content_id"])
+        return [dict(episode, type="episode") for episode in response.get("items", []) if isinstance(episode, dict)]
+
+    def similar(self, item):
+        """Related titles; the row is optional, so any failure just hides it."""
+        try:
+            return video_items(self.client.similar(item["content_id"]).get("items"))
+        except (ApiError, OSError, ValueError, KeyError, AttributeError):
+            return []
+
+    def play_next(self, item):
+        """Play a series' Next Up episode straight from the series page."""
+        content_id = item.get("play_content_id")
+        if not content_id:
+            return None
+        return self.play(self.client.item(content_id))
 
     def open_item(self, card):
         content_id = card["content_id"]
@@ -533,6 +515,9 @@ class Application:
     @staticmethod
     def resume_seconds(item):
         return resume_position(item)
+
+    def image(self, item, kind):
+        return self.client.image_url(item, kind) if isinstance(item, dict) else ""
 
     def artwork(self, item):
         result = {}

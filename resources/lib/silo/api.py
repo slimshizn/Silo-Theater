@@ -400,6 +400,10 @@ class SiloClient:
         filters.setdefault("type", "video")
         return self.items(**filters)
 
+    def similar(self, item_id, limit=20):
+        return self.request("GET", "/recommendations/similar/" + quote(str(item_id), safe=""),
+                            params={"limit": limit})
+
     def seasons(self, series_id, **params):
         return self.request("GET", "/catalog/series/{}/seasons".format(quote(str(series_id), safe="")), params=params)
 

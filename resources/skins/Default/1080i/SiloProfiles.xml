@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Profile picker ("Who's watching?"). ui_people.ProfilePicker fills list 300 and
+     re-centres it: each column is 284 px (256 px profile plus a 28 px gap). -->
+<window type="dialog">
+  <defaultcontrol always="true">300</defaultcontrol>
+  <coordinates><system>1</system><width>1920</width><height>1080</height></coordinates>
+  <controls>
+    <control type="image"><left>0</left><top>0</top><width>1920</width><height>1080</height><texture colordiffuse="FF000000">white.png</texture></control>
+    <control type="image"><left>480</left><top>270</top><width>1440</width><height>810</height><aspectratio>stretch</aspectratio><texture>brand_light.png</texture></control>
+    <control type="image"><left>0</left><top>0</top><width>960</width><height>1080</height><texture colordiffuse="FF000000">scrim_left.png</texture></control>
+    <control type="image"><left>90</left><top>60</top><width>100</width><height>52</height><aspectratio>keep</aspectratio><texture>silo_wordmark.png</texture></control>
+    <control type="label"><left>214</left><top>60</top><width>400</width><height>52</height><aligny>center</aligny><font>font36_title</font><textcolor>FFEDEDED</textcolor><label>Theater</label></control>
+
+    <control type="label"><left>160</left><top>232</top><width>1600</width><height>80</height><align>center</align><aligny>center</aligny><font>font52_title</font><textcolor>FFEDEDED</textcolor><label>Who's watching?</label></control>
+    <control type="label"><left>160</left><top>316</top><width>1600</width><height>40</height><align>center</align><aligny>center</aligny><font>font12</font><textcolor>9EEDEDED</textcolor><label>$INFO[Window.Property(silo.account_label),Signed in as ,]</label><visible>!String.IsEmpty(Window.Property(silo.account_label))</visible></control>
+
+    <control type="list" id="300">
+      <left>108</left><top>400</top><width>1704</width><height>390</height>
+      <orientation>horizontal</orientation>
+      <scrolltime tween="cubic" easing="out">200</scrolltime>
+      <itemlayout width="284" height="390">
+        <control type="image"><left>32</left><top>32</top><width>220</width><height>220</height><texture colordiffuse="FF15171C">circle.png</texture></control>
+        <control type="label"><left>32</left><top>32</top><width>220</width><height>220</height><align>center</align><aligny>center</aligny><font>font52_title</font><textcolor>B3EDEDED</textcolor><label>$INFO[ListItem.Property(silo.initials)]</label></control>
+        <control type="image"><left>32</left><top>32</top><width>220</width><height>220</height><aspectratio>scale</aspectratio><texture diffuse="mask_circle.png" background="true">$INFO[ListItem.Art(thumb)]</texture></control>
+        <control type="label"><left>14</left><top>272</top><width>256</width><height>44</height><align>center</align><aligny>center</aligny><font>font27</font><textcolor>9EEDEDED</textcolor><label>$INFO[ListItem.Label]</label></control>
+        <control type="label"><left>14</left><top>316</top><width>256</width><height>30</height><align>center</align><aligny>center</aligny><font>font10</font><textcolor>9EEDEDED</textcolor><label>PIN</label><visible>!String.IsEmpty(ListItem.Property(silo.pin))</visible></control>
+      </itemlayout>
+      <focusedlayout width="284" height="390">
+        <control type="group">
+          <animation effect="zoom" start="100" end="112" center="142,142" time="200" tween="cubic" easing="out">Focus</animation>
+          <animation effect="zoom" start="112" end="100" center="142,142" time="200" tween="cubic" easing="out">Unfocus</animation>
+          <control type="image"><left>20</left><top>20</top><width>244</width><height>244</height><texture colordiffuse="FFEDEDED">ring_circle.png</texture><visible>Control.HasFocus(300)</visible></control>
+          <control type="image"><left>32</left><top>32</top><width>220</width><height>220</height><texture colordiffuse="FF15171C">circle.png</texture></control>
+          <control type="label"><left>32</left><top>32</top><width>220</width><height>220</height><align>center</align><aligny>center</aligny><font>font52_title</font><textcolor>FFEDEDED</textcolor><label>$INFO[ListItem.Property(silo.initials)]</label></control>
+          <control type="image"><left>32</left><top>32</top><width>220</width><height>220</height><aspectratio>scale</aspectratio><texture diffuse="mask_circle.png" background="true">$INFO[ListItem.Art(thumb)]</texture></control>
+        </control>
+        <control type="label"><left>14</left><top>282</top><width>256</width><height>44</height><align>center</align><aligny>center</aligny><font>font27</font><textcolor>FFEDEDED</textcolor><label>$INFO[ListItem.Label]</label><scroll>true</scroll></control>
+        <control type="label"><left>14</left><top>326</top><width>256</width><height>30</height><align>center</align><aligny>center</aligny><font>font10</font><textcolor>9EEDEDED</textcolor><label>PIN</label><visible>!String.IsEmpty(ListItem.Property(silo.pin))</visible></control>
+      </focusedlayout>
+    </control>
+
+    <control type="label"><left>90</left><top>990</top><width>1400</width><height>30</height><aligny>center</aligny><font>font10</font><textcolor>80EDEDED</textcolor><label>Silo Theater is a community add-on for Silo, not an official Silo app.</label></control>
+  </controls>
+</window>
