@@ -10,8 +10,7 @@
     <control type="image"><left>0</left><top>0</top><width>1920</width><height>1080</height><texture colordiffuse="FF000000">white.png</texture></control>
     <control type="image"><left>480</left><top>270</top><width>1440</width><height>810</height><aspectratio>stretch</aspectratio><texture>brand_light.png</texture></control>
     <control type="image"><left>0</left><top>0</top><width>960</width><height>1080</height><texture colordiffuse="FF000000">scrim_left.png</texture></control>
-    <control type="image"><left>90</left><top>60</top><width>52</width><height>52</height><aspectratio>keep</aspectratio><texture>app_mark.png</texture></control>
-    <control type="label"><left>166</left><top>60</top><width>520</width><height>52</height><aligny>center</aligny><font>font36_title</font><textcolor>FFEDEDED</textcolor><label>Founders Theater</label></control>
+    <control type="label"><left>90</left><top>60</top><width>520</width><height>52</height><aligny>center</aligny><font>font36_title</font><textcolor>FFEDEDED</textcolor><label>Founders Theater</label></control>
 
     <control type="label"><left>160</left><top>232</top><width>1600</width><height>80</height><align>center</align><aligny>center</aligny><font>font52_title</font><textcolor>FFEDEDED</textcolor><label>$INFO[Window.Property(silo.heading)]</label></control>
     <control type="label"><left>160</left><top>316</top><width>1600</width><height>40</height><align>center</align><aligny>center</aligny><font>font12</font><textcolor>9EEDEDED</textcolor><label>$INFO[Window.Property(silo.account_label),Signed in as ,]</label><visible>!String.IsEmpty(Window.Property(silo.account_label))</visible></control>

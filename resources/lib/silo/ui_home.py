@@ -22,6 +22,9 @@ LIBRARY_TABS = {TAB_BUTTONS["movies"]: "movie", TAB_BUTTONS["series"]: "series"}
 SCREEN_TABS = {TAB_BUTTONS["for_you"]: "for_you", TAB_BUTTONS["calendar"]: "calendar",
                TAB_BUTTONS["requests"]: "requests"}
 SEARCH_SIZE, SEARCH_GAP, TAB_GAP, SCREEN_WIDTH, SCREEN_HEIGHT = 56, 24, 8, 1920, 1080
+# The add-on's name sits at x 88 in font36_title (about 380 px wide); the tab group
+# stays centred but never starts closer to the name than this.
+TABS_MIN_LEFT = 88 + 380 + 40
 BAR_CONTROLS = frozenset([SEARCH_BUTTON, AVATAR] + [tab[1] for tab in TABS])
 
 HOME_GROUP, HERO_GROUP, HERO_META = 300, 400, 430
@@ -260,7 +263,7 @@ class HomeWindow(xbmcgui.WindowXML):
                 chain.append(button)
         chain.append(AVATAR)
         width = left - TAB_GAP + SEARCH_GAP + SEARCH_SIZE
-        self.cluster_left = (SCREEN_WIDTH - width) // 2
+        self.cluster_left = max((SCREEN_WIDTH - width) // 2, TABS_MIN_LEFT)
         self.getControl(TAB_CLUSTER).setPosition(self.cluster_left, 0)
         for before, after in zip(chain, chain[1:]):
             self.getControl(before).controlRight(self.getControl(after))

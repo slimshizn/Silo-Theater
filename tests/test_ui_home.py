@@ -470,7 +470,11 @@ class TabTests(unittest.TestCase):
         window = open_window(make_application(requests=True))
         window.getControl(208).setVisible.assert_called_with(True)
         width = 56 + 24 + 124 + 148 + 140 + 156 + 172 + 172 + 5 * 8 + 24 + 56
-        window.getControl(ui_home.TAB_CLUSTER).setPosition.assert_called_with((1920 - width) // 2, 0)
+        # With every tab shown, centring would run into the add-on's name; the row starts clear of it.
+        window.getControl(ui_home.TAB_CLUSTER).setPosition.assert_called_with(
+            max((1920 - width) // 2, ui_home.TABS_MIN_LEFT), 0)
+        self.assertGreaterEqual(window.cluster_left, ui_home.TABS_MIN_LEFT)
+        self.assertLessEqual(window.cluster_left + width, 1776 - 24)  # still clear of the avatar
         window.getControl(212).controlRight.assert_called_with(window.getControl(203))
         window.getControl(205).controlRight.assert_called_with(window.getControl(ui_home.AVATAR))
 

@@ -6125,16 +6125,8 @@
       <width>1920</width>
       <height>64</height>
       <animation effect="fade" start="100" end="70" time="200" condition="!(ControlGroup(200).HasFocus() | ControlGroup(600).HasFocus())">Conditional</animation>
-      <control type="image">
-        <left>88</left>
-        <top>6</top>
-        <width>52</width>
-        <height>52</height>
-        <aspectratio>keep</aspectratio>
-        <texture>app_mark.png</texture>
-      </control>
       <control type="label">
-        <left>164</left>
+        <left>88</left>
         <top>0</top>
         <width>520</width>
         <height>64</height>

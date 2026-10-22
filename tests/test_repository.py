@@ -135,7 +135,7 @@ class RepositoryTests(unittest.TestCase):
 class WidgetsAddonTests(unittest.TestCase):
     """Widgets ship as their own add-on so Founders Theater is listed once in Kodi."""
 
-    def test_repository_lists_the_widgets_addon_with_its_four_files(self):
+    def test_repository_lists_the_widgets_addon_with_its_files(self):
         with tempfile.TemporaryDirectory() as folder:
             build_repository(ROOT, Path(folder))
             catalog = ET.parse(Path(folder) / "addons.xml").getroot()
@@ -147,7 +147,7 @@ class WidgetsAddonTests(unittest.TestCase):
             with zipfile.ZipFile(package) as archive:
                 self.assertEqual(sorted(archive.namelist()), [
                     "plugin.video.silotheater/LICENSE", "plugin.video.silotheater/addon.xml",
-                    "plugin.video.silotheater/default.py", "plugin.video.silotheater/icon.png"])
+                    "plugin.video.silotheater/default.py"])
             silo = catalog.find("addon[@id='script.silo']")
             self.assertIsNone(silo.find("extension[@point='xbmc.python.pluginsource']"))
 

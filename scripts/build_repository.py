@@ -103,7 +103,7 @@ def _write(path: Path, data: bytes) -> None:
 
 
 WIDGETS_ID = "plugin.video.silotheater"
-WIDGETS_FILES = ("addon.xml", "default.py", "icon.png")
+WIDGETS_FILES = ("addon.xml", "default.py")
 
 
 def _widgets(root: Path):
@@ -183,7 +183,8 @@ def build_repository(root: Path = ROOT, output_dir: Optional[Path] = None) -> Di
     if widgets is not None:
         icons[output / "zips" / WIDGETS_ID / "icon.png"] = root / "widgets" / "icon.png"
     for path, source in icons.items():
-        _write(path, source.read_bytes())
+        if source.is_file():  # The add-ons currently use Kodi's default icon.
+            _write(path, source.read_bytes())
     _write(output / "addons.xml", catalog_bytes)
     _write(output / "addons.xml.md5", checksum)
     _write(output / "index.html", landing_page)

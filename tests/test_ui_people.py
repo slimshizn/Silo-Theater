@@ -810,10 +810,7 @@ class SkinTests(unittest.TestCase):
             labels = [node.findtext("label") for node in tree.iter("control")]
             self.assertIn(DISCLAIMER, labels, name)
             self.assertIn("Founders Theater", labels, name)
-            # The add-on's own mark, never the Silo wordmark (it must not look official).
-            mark = [node for node in tree.iter("control") if node.findtext("texture") == "app_mark.png"]
-            self.assertEqual(len(mark), 1, name)
-            self.assertEqual((mark[0].findtext("width"), mark[0].findtext("height")), ("52", "52"), name)
+            # Only the add-on's name, never the Silo wordmark (it must not look official).
             self.assertNotIn("silo_wordmark.png", (SKIN / name).read_text(encoding="utf-8"), name)
 
     def test_profile_and_code_controls_match_controllers(self):

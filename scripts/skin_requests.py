@@ -183,8 +183,8 @@ def hub():
               aspect="scale", fade=400, background=True),
         image(0, 0, 1920, 240, "scrim_top.png", color=BLACK),
         group(None, 0, 56, 1920, 64, [
-            image(88, 6, 52, 52, "app_mark.png", aspect="keep"),
-            label(212, 0, 400, 64, "Requests", "font36_title", TEXT),
+            label(88, 0, 400, 64, "Founders Theater", "font36_title", TEXT),
+            label(480, 0, 400, 64, "Requests", "font36_title", MUTED),
         ]),
     ] + search + [preview] + [row_slot(index) for index in range(SLOTS)] + [
         label(88, 620, 1744, 60, "$INFO[Window.Property(silo.empty)]", "font27", MUTED, "center", control_id=150),
