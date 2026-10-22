@@ -116,7 +116,7 @@ def kodi_media_url(server_url, stream):
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.2.3", options=None):
+    def __init__(self, client, mode="auto", version="0.2.4", options=None):
         self.client, self.mode, self.version = client, mode, version
         self.options = dict(options or {})
         # /api/v2 calls this installation_id, but it identifies the SERVER.
@@ -312,6 +312,60 @@ class ResumeGuard:
         if elapsed >= self.timeout:
             raise PlaybackError("Kodi could not restore the saved playback position. Your saved progress was kept.")
         return False
+
+
+class StallRecovery:
+    """Nudge a decoder that stopped advancing, a common fix after audio changes.
+
+    Kodi's hardware decoder can freeze with no player callback firing while the
+    stream keeps arriving. When the position has not moved for
+    ``stall_seconds`` (not paused, not buffering), ``observe`` returns a target a
+    few seconds ahead; a small forward seek restarts the decoder. Nudges are
+    spaced by ``settle_seconds``, capped at ``max_nudges``, and the cap resets
+    after ``healthy_reset_seconds`` of normal playback.
+    """
+
+    def __init__(self, clock=None, stall_seconds=3.0, nudge_seconds=3.0, max_nudges=3,
+                 settle_seconds=5.0, healthy_reset_seconds=30.0):
+        self.clock = clock or time.monotonic
+        self.stall_seconds = stall_seconds
+        self.nudge_seconds = nudge_seconds
+        self.max_nudges = max_nudges
+        self.settle_seconds = settle_seconds
+        self.healthy_reset_seconds = healthy_reset_seconds
+        self.nudges = 0
+        self.exhausted_reported = False
+        self._position = None
+        self._changed_at = None
+        self._last_nudge_at = None
+        self._settle_until = 0.0
+
+    def observe(self, position, paused=False, caching=False, total=None):
+        """Return a seek target when playback is stuck, otherwise None."""
+        now = self.clock()
+        moved = (self._position is None or position > self._position + 0.1
+                 or position < self._position - 0.5)
+        if paused or caching or moved:
+            # A pause, buffering or real movement (including a user seek back)
+            # restarts the stall clock.
+            if moved and self.nudges and self._last_nudge_at is not None \
+                    and now - self._last_nudge_at >= self.healthy_reset_seconds:
+                self.nudges = 0
+                self.exhausted_reported = False
+            self._position, self._changed_at = position, now
+            return None
+        if now < self._settle_until or now - self._changed_at < self.stall_seconds:
+            return None
+        if self.nudges >= self.max_nudges:
+            return None
+        target = position + self.nudge_seconds
+        if total and total > 0 and target >= total - 5:
+            return None  # Never jump into the last seconds of the title.
+        self.nudges += 1
+        self._last_nudge_at = now
+        self._settle_until = now + self.settle_seconds
+        self._changed_at = now
+        return target
 
 
 class ProgressReporter:
@@ -610,6 +664,7 @@ class PlaybackController:
             stage = "polling"
             revision = player.state_revision
             unavailable_since = None
+            recovery = StallRecovery()
             while not player.finished:
                 if monitor.waitForAbort(0.25):
                     stop_local()
@@ -651,6 +706,23 @@ class PlaybackController:
                     continue
                 latest_sample = (_number(current), bool(player.paused))
                 reporter.submit(*latest_sample)
+                caching = bool(condition and condition("Player.Caching"))
+                if recovery.nudges >= recovery.max_nudges:
+                    if not recovery.exhausted_reported:
+                        recovery.exhausted_reported = True
+                        log_event("stall_recovery_exhausted", current)
+                total = None
+                target = recovery.observe(latest_sample[0], latest_sample[1], caching)
+                if target is not None and not player.finished:
+                    try:
+                        total = player.getTotalTime()
+                    except (AttributeError, RuntimeError):
+                        total = None
+                    if total and total > 0 and target >= total - 5:
+                        target = None
+                    if target is not None:
+                        log_event("stall_recovery_seek", current)
+                        player.seekTime(target)
                 if revision != player.state_revision:
                     revision = player.state_revision
                     log_event("paused" if player.paused else "resumed", current)

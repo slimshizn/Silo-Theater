@@ -15,8 +15,8 @@ from urllib.parse import parse_qs
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "resources/lib"))
 
 from silo.playback import (CAPABILITY_TERMINALS, PlaybackController, PlaybackError, PlaybackSession,
-                           ProgressReporter, ResumeGuard, embedded_subtitle_index, kodi_media_url,
-                           select_file, subtitle_extension)
+                           ProgressReporter, ResumeGuard, StallRecovery, embedded_subtitle_index,
+                           kodi_media_url, select_file, subtitle_extension)
 from silo.api import ApiError, SiloClient
 from silo.storage import StorageError
 from playback_contract import assert_contract
@@ -815,6 +815,76 @@ class ControllerTests(unittest.TestCase):
         # Playback and reporting otherwise proceed normally.
         self.assertTrue(any(path.endswith("/progress") for _, path, _ in client.calls))
         self.assertEqual(client.calls[-1][0], "DELETE")
+
+
+    def test_frozen_decoder_gets_a_forward_nudge_and_playback_continues(self):
+        # Plays to 5 s, then the position freezes for 4 s of polling, then moves.
+        events = [(1, None), (2, None), (3, None), (4, None), (5, None)]
+        events += [(5, None)] * 16
+        events += [(9, None), (10, None), (11, "stop")]
+        client = FakeClient()
+        state = self.run_player(client, events, start=0)
+        self.assertEqual(state.seeks, [8.0])
+        self.assertTrue(any("stall_recovery_seek" in line for line in state.logs))
+        self.assertEqual(client.calls[-1][0], "DELETE")
+
+    def test_paused_playback_is_never_nudged(self):
+        events = [(1, None), (2, None), (2, "pause")] + [(2, None)] * 40 + [(2, "resume"), (3, "stop")]
+        state = self.run_player(FakeClient(), events, start=0)
+        self.assertEqual(state.seeks, [])
+
+
+class StallRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.now = 0.0
+        self.recovery = StallRecovery(clock=lambda: self.now)
+
+    def step(self, position, seconds=0.25, **kwargs):
+        self.now += seconds
+        return self.recovery.observe(position, **kwargs)
+
+    def test_advancing_playback_is_left_alone(self):
+        position = 0.0
+        for _ in range(200):
+            position += 0.25
+            self.assertIsNone(self.step(position))
+
+    def test_stuck_position_is_nudged_after_three_seconds(self):
+        self.assertIsNone(self.step(10))
+        results = [self.step(10) for _ in range(12)]
+        self.assertEqual(results[:-1], [None] * 11)
+        self.assertEqual(results[-1], 13.0)
+
+    def test_nudges_wait_to_settle_and_stop_after_three(self):
+        self.step(10)
+        targets = [target for target in (self.step(10) for _ in range(400)) if target is not None]
+        self.assertEqual(targets, [13.0, 13.0, 13.0])
+        # Settle time keeps nudges at least five seconds apart.
+        self.assertEqual(self.recovery.nudges, 3)
+
+    def test_pause_and_buffering_reset_the_stall_clock(self):
+        self.step(10)
+        for _ in range(40):
+            self.assertIsNone(self.step(10, paused=True))
+        for _ in range(40):
+            self.assertIsNone(self.step(10, caching=True))
+        self.assertEqual(self.recovery.nudges, 0)
+
+    def test_healthy_playback_restores_the_nudge_allowance(self):
+        self.step(10)
+        for _ in range(400):
+            self.step(10)
+        self.assertEqual(self.recovery.nudges, 3)
+        position = 10.0
+        for _ in range(140):  # 35 s of normal playback after the last nudge
+            position += 0.25
+            self.step(position)
+        self.assertEqual(self.recovery.nudges, 0)
+
+    def test_never_nudges_into_the_last_seconds(self):
+        self.step(95)
+        results = [self.step(95, total=100) for _ in range(40)]
+        self.assertEqual([r for r in results if r is not None], [])
 
 
 class SubtitleHelperTests(unittest.TestCase):
