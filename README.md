@@ -11,18 +11,28 @@ Silo Theater brings your Silo media library to **Kodi 21 or newer**, with a full
 - Play original media files, resume playback and sync progress with Silo.
 - Configure HDR10, Dolby Vision or P7 FEL capabilities for supported devices.
 
-## Build and install
+## Install in Kodi
+
+1. Open **Settings → File manager → Add source** and enter `https://slimshizn.github.io/Silo-Theater/`. Name the source **Silo Theater**.
+2. Open **Add-ons → Install from zip file → Silo Theater**. Enable installation from unknown sources if prompted.
+3. Select **repository.silo.theater-1.0.0.zip**.
+4. Open **Install from repository → Silo Theater Repository**, find **Silo**, and select **Install**.
+
+Open **Silo** in Kodi, enter your Silo server's full HTTP or HTTPS URL, sign in and choose a profile. Server URLs with a reverse-proxy path prefix are supported.
+
+You can also [download the repository installer](https://slimshizn.github.io/Silo-Theater/repository.silo.theater-1.0.0.zip) in a browser and transfer it to your Kodi device.
+
+## Build from source
 
 Build from source using **Python 3.9 or newer**. No third-party Python packages are required.
 
 ```sh
 make check
 make build
+make repository
 ```
 
-Install `dist/script.silo-0.1.0.zip` through Kodi's **Add-ons → Install from zip file** menu. Enable installation from unknown sources if prompted.
-
-Open **Silo** from your video add-ons, enter your Silo server's full HTTP or HTTPS URL, sign in and choose a profile. Server URLs with a reverse-proxy path prefix are supported.
+`make build` creates `dist/script.silo-0.1.0.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
