@@ -362,6 +362,11 @@ class SiloClient:
     def profiles(self):
         return self.request("GET", "/profiles", profile=False)
 
+    def update_profile(self, profile_id, changes):
+        """Change the active profile's own playback preferences."""
+        return self.request("PATCH", "/profiles/{}".format(quote(str(profile_id), safe="")), dict(changes),
+                            retry_auth=False)
+
     def verify_pin(self, profile_id, pin):
         return self.request("POST", "/profiles/{}/verify-pin".format(quote(str(profile_id), safe="")),
                             {"pin": pin}, profile=False, retry_auth=False)

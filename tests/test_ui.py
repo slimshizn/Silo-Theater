@@ -73,6 +73,7 @@ class ApplicationFlowTests(unittest.TestCase):
         self.app.store = Store()
         self.app.client = MagicMock()
         self.app._libraries = None
+        self.app.profile = {}
         self.app.profile_avatar = ""
 
     def test_pin_refusal_attempts_once_and_never_selects_profile(self):
@@ -395,6 +396,53 @@ class ApplicationFlowTests(unittest.TestCase):
             {"id": "p", "name": "Example", "avatar_url": "https://avatars.example.invalid/9.x/robot/svg?seed=x"}]}
         self.assertTrue(self.app.choose_profile(force=True))
         self.assertEqual(self.app.profile_avatar, "https://avatars.example.invalid/9.x/robot/png?seed=x")
+
+    def test_next_episode_crosses_seasons_and_skips_specials(self):
+        self.app.client.seasons.return_value = {"items": [
+            {"content_id": "s0", "season_number": 0, "is_specials": True},
+            {"content_id": "s1", "season_number": 1}, {"content_id": "s2", "season_number": 2}]}
+        self.app.client.episodes.side_effect = lambda season_id: {"items": {
+            "s1": [{"content_id": "e1", "season_number": 1, "episode_number": 1},
+                   {"content_id": "e2", "season_number": 1, "episode_number": 2}],
+            "s2": [{"content_id": "e3", "season_number": 2, "episode_number": 1}],
+        }[season_id]}
+        current = {"series_id": "series:1", "series_title": "Example Show", "season_number": 1, "episode_number": 1}
+        self.assertEqual(self.app.next_episode(current)["content_id"], "e2")
+        self.assertEqual(self.app.next_episode(dict(current, episode_number=2))["content_id"], "e3")
+        self.assertIsNone(self.app.next_episode(dict(current, season_number=2)))
+        self.assertIsNone(self.app.next_episode({"season_number": 1, "episode_number": 1}))
+
+    def test_up_next_and_version_switch_continue_playback(self):
+        episode = movie_item()
+        episode.update(content_id="episode:1", type="episode")
+        following = dict(movie_item(0), content_id="episode:2", type="episode")
+        self.app.client.item.side_effect = lambda content_id, **params: following if content_id == "episode:2" else episode
+        actions = iter([{"stop": "next", "item": {"content_id": "episode:2"}}, None])
+        with patch.object(application_module, "PlaybackController") as controller:
+            type(controller.return_value).next_action = property(lambda self: next(actions))
+            self.app.play(episode, resume=False)
+        played = [call.args[0]["content_id"] for call in controller.return_value.play.call_args_list]
+        self.assertEqual(played, ["episode:1", "episode:2"])
+
+        actions = iter([{"stop": "version", "file_id": "file-b", "position": 1234.5}, None])
+        item = movie_item(multiple=True)
+        self.app.client.item.side_effect = None
+        self.app.client.item.return_value = item
+        with patch.object(application_module, "PlaybackController") as controller:
+            type(controller.return_value).next_action = property(lambda self: next(actions))
+            self.app.play(item, resume=False, file_id="file-a")
+        second = controller.return_value.play.call_args_list[1].kwargs
+        self.assertEqual((second["file_id"], second["start_position"]), ("file-b", 1234.5))
+
+    def test_update_profile_merges_server_answer(self):
+        self.app.profile = {"id": "p", "name": "Example", "auto_skip_intro": False}
+        self.app.client.update_profile.return_value = {"id": "p", "name": "Example", "auto_skip_intro": True}
+        self.assertTrue(self.app.update_profile({"auto_skip_intro": True})["auto_skip_intro"])
+        self.app.client.update_profile.assert_called_once_with("p", {"auto_skip_intro": True})
+        self.assertEqual(self.app.auto_skip(), {"intro": True, "credits": False, "recap": False})
+        self.app.profile = {}
+        with self.assertRaises(ApiError):
+            self.app.update_profile({"auto_skip_intro": True})
 
     def test_session_storage_failure_is_shown_inside_startup_error_handler(self):
         self.app.store = None

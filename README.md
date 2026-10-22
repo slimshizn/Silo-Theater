@@ -11,6 +11,10 @@ Silo Theater is a community project. It is not an official Silo app and is not m
 - Home rows in your server's order, with a hero that follows the title you focus.
 - Movies and Series grids with library and sort choices, and search.
 - Title details with seasons, an episode rail, cast and related titles.
+- Skip Intro, Skip Recap and Skip Credits buttons from your server's markers, with your profile's auto-skip settings.
+- Up next at the end of an episode, with a 10-second countdown.
+- A Silo player menu during playback: info, stats, version, speed, aspect, sleep timer, audio, subtitles and chapters.
+- Silo Settings for your profile (auto-skip, languages, subtitles, quality) and this device.
 - Select a movie or episode's media file by filename, edition and format.
 - Resume movies and episodes from their saved position and sync progress with Silo.
 - Customize resume behavior, file selection, browsing and playback preferences.
@@ -41,11 +45,17 @@ make build
 make repository
 ```
 
-`make build` creates `dist/script.silo-0.3.0.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
+`make build` creates `dist/script.silo-0.4.0.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
-Version **0.3.0** supports **original HTTP direct play**. Titles that require remuxing or transcoding may be refused. Auto-next, a custom player overlay and automatic quality switching are not available.
+Version **0.4.0** supports **original HTTP direct play**. Titles that require remuxing or transcoding may be refused, and quality switching is not available.
+
+### During playback
+
+Press **Menu** on the remote (**C** on a keyboard) to open the Silo player menu. It shows playback info and live stats, and lets you change the version, speed, aspect, sleep timer, audio track and subtitles, or jump to a chapter. Audio delay and subtitle style open Kodi's own settings. Kodi passes keys to add-ons only through keymaps, so Silo Theater adds one small keymap file that is active only in fullscreen video; turn off **Silo player menu on the Menu key** in its settings to remove it.
+
+When your Silo server has intro, recap or credits markers for a file, a **Skip** button appears while that part plays. Turn on auto-skip under **Settings** in the profile menu to skip without asking. Near the end of an episode, **Up next** shows the following episode and plays it after a 10-second countdown; turn off **Play next episode automatically** to wait for your choice instead.
 
 The first time Silo reaches your library it asks **What can this TV show?** and sets the display capability from your answer. Until a device is described, Silo declares SDR with a 1080p ceiling, so HDR and 4K titles are refused with a message that names the setting to change. You can change the answer later under **Settings → Playback → HDR and Dolby Vision capability** and **Maximum video resolution**. Select HDR10 or Dolby Vision only for a compatible device and display. Select **Dolby Vision P7 FEL** only when your hardware, firmware and Kodi build support full enhancement-layer decoding.
 

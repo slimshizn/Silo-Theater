@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 msgid ""
 msgstr ""
-"Project-Id-Version: script.silo 0.3.0\n"
+"Project-Id-Version: script.silo 0.4.0\n"
 "Language: en_GB\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -195,4 +195,24 @@ msgstr ""
 
 msgctxt "#32057"
 msgid "Display plot summaries on title details screens."
+msgstr ""
+
+msgctxt "#32058"
+msgid "Near the end of an episode, show Up next and play the next episode after a short countdown."
+msgstr ""
+
+msgctxt "#32059"
+msgid "Show skip buttons"
+msgstr ""
+
+msgctxt "#32060"
+msgid "Offer Skip Intro, Skip Recap and Skip Credits buttons during playback. Profile auto-skip settings still apply."
+msgstr ""
+
+msgctxt "#32061"
+msgid "Silo player menu on the Menu key"
+msgstr ""
+
+msgctxt "#32062"
+msgid "During Silo playback, the remote's Menu key (C on a keyboard) opens the Silo player menu: info, stats, versions, speed, audio, subtitles and chapters. Adds a Kodi keymap file for fullscreen video."
 msgstr ""

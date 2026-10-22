@@ -17,7 +17,13 @@ DEFAULTS = {
     "progress_interval": 10,
     "page_size": 50,
     "show_plot": True,
+    # Device-local player behaviour; profile-wide choices live on the server.
+    "auto_next": True,
+    "skip_prompts": True,
+    "player_menu_key": True,
 }
+
+BOOLEANS = ("show_plot", "auto_next", "skip_prompts", "player_menu_key")
 
 CHOICES = {
     "sign_in_method": ("code", "password"),
@@ -54,7 +60,8 @@ def read_options(addon):
             continue
         if value in choices:
             options[name] = value
-    value = _read(addon, "show_plot").lower()
-    if value in ("true", "false"):
-        options["show_plot"] = value == "true"
+    for name in BOOLEANS:
+        value = _read(addon, name).lower()
+        if value in ("true", "false"):
+            options[name] = value == "true"
     return options

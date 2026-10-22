@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<window type="dialog">
+  <defaultcontrol always="true">200</defaultcontrol>
+  <coordinates><left>0</left><top>0</top></coordinates>
+  <animation effect="slide" start="0,60" end="0,0" time="250" tween="cubic" easing="out">WindowOpen</animation>
+  <animation effect="fade" start="0" end="100" time="250">WindowOpen</animation>
+  <animation effect="fade" start="100" end="0" time="150">WindowClose</animation>
+  <controls>
+    <control type="image">
+      <left>1144</left><top>708</top><width>680</width><height>320</height>
+      <texture border="28" colordiffuse="F2131417">round28.png</texture>
+    </control>
+    <control type="image">
+      <left>1168</left><top>732</top><width>320</width><height>180</height>
+      <texture border="16" colordiffuse="FF15171C">round16.png</texture>
+    </control>
+    <control type="image">
+      <left>1168</left><top>732</top><width>320</width><height>180</height>
+      <aspectratio>scale</aspectratio><fadetime>200</fadetime>
+      <texture diffuse="mask_wide.png">$INFO[Window.Property(silo.next_thumb)]</texture>
+    </control>
+    <control type="label">
+      <left>1512</left><top>736</top><width>290</width><height>30</height>
+      <font>font10</font><textcolor>B3EDEDED</textcolor><label>UP NEXT</label>
+    </control>
+    <control type="label">
+      <left>1512</left><top>770</top><width>290</width><height>34</height>
+      <font>font12</font><textcolor>BFEDEDED</textcolor>
+      <label>$INFO[Window.Property(silo.next_eyebrow)]</label>
+    </control>
+    <control type="textbox">
+      <left>1512</left><top>806</top><width>290</width><height>76</height>
+      <font>font27</font><textcolor>FFEDEDED</textcolor>
+      <label>$INFO[Window.Property(silo.next_title)]</label>
+    </control>
+    <control type="label">
+      <left>1512</left><top>882</top><width>290</width><height>30</height>
+      <font>font12</font><textcolor>B3EDEDED</textcolor>
+      <label>$INFO[Window.Property(silo.next_countdown)]</label>
+    </control>
+    <control type="button" id="200">
+      <left>1168</left><top>940</top><width>300</width><height>64</height>
+      <label>Play now</label><font>font25_title</font><align>center</align><aligny>center</aligny>
+      <textcolor>FFEDEDED</textcolor><focusedcolor>FF0B0B0C</focusedcolor>
+      <texturefocus border="28" colordiffuse="FFEDEDED">pill56.png</texturefocus>
+      <texturenofocus border="28">pill56_idle.png</texturenofocus>
+      <onleft>201</onleft><onright>201</onright><onup>200</onup><ondown>200</ondown>
+    </control>
+    <control type="button" id="201">
+      <left>1488</left><top>940</top><width>312</width><height>64</height>
+      <label>Hide</label><font>font25_title</font><align>center</align><aligny>center</aligny>
+      <textcolor>FFEDEDED</textcolor><focusedcolor>FF0B0B0C</focusedcolor>
+      <texturefocus border="28" colordiffuse="FFEDEDED">pill56.png</texturefocus>
+      <texturenofocus border="28">pill56_idle.png</texturenofocus>
+      <onleft>200</onleft><onright>200</onright><onup>201</onup><ondown>201</ondown>
+    </control>
+  </controls>
+</window>

@@ -85,9 +85,18 @@
           <default>false</default>
           <control type="toggle" />
         </setting>
-        <setting id="auto_next" type="boolean" label="32017">
+        <setting id="auto_next" type="boolean" label="32017" help="32058">
           <level>0</level>
-          <visible>false</visible>
+          <default>true</default>
+          <control type="toggle" />
+        </setting>
+        <setting id="skip_prompts" type="boolean" label="32059" help="32060">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle" />
+        </setting>
+        <setting id="player_menu_key" type="boolean" label="32061" help="32062">
+          <level>0</level>
           <default>true</default>
           <control type="toggle" />
         </setting>

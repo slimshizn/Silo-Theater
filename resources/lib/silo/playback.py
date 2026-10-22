@@ -116,7 +116,7 @@ def kodi_media_url(server_url, stream):
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.3.0", options=None):
+    def __init__(self, client, mode="auto", version="0.4.0", options=None):
         self.client, self.mode, self.version = client, mode, version
         self.options = dict(options or {})
         # /api/v2 calls this installation_id, but it identifies the SERVER.
@@ -494,6 +494,37 @@ class PlaybackController:
         self.client, self.addon = client, addon
         self.last_result = None
         self.last_reporter = None
+        # Set by the application: find the episode after ``item``, and resolve art.
+        self.next_lookup = None
+        self.image = None
+        # Why playback stopped for something else: next episode, version, sleep.
+        self.next_action = None
+
+    def _extras(self, player, item, plan, options, file_id, log_event):
+        """Overlays for this playback, or None where Kodi cannot draw them."""
+        try:
+            import xbmcgui
+            from .media import available_versions, default_version
+            from .player_extras import PlaybackExtras
+            from .ui_overlay import SkipButton, UpNextCard
+            from .ui_player import PlayerMenu
+            xbmcgui.WindowXMLDialog, xbmcgui.Window  # Missing outside a real Kodi.
+        except Exception:
+            log_event("extras_unavailable")
+            return None
+        path = self.addon.getAddonInfo("path")
+        effective = plan.get("effective_file_id") or file_id
+        version = default_version(item, preferred_file_id=effective)
+
+        def notify(message):
+            xbmcgui.Dialog().notification("Silo", message, time=2500, sound=False)
+
+        return PlaybackExtras(
+            player, item, version, plan, options, skip_button=SkipButton(path), up_next=UpNextCard(path),
+            menu_factory=lambda: PlayerMenu(path), home=xbmcgui.Window(10000), notify=notify,
+            next_lookup=self.next_lookup, image=self.image, versions=available_versions(item),
+            file_id=effective, save_setting=self.addon.setSetting,
+            log=lambda event, position=None: log_event(event, position))
 
     def _save_subtitle(self, artifact, log_event):
         """Download a sidecar with the add-on's own headers; return a local path.
@@ -576,8 +607,9 @@ class PlaybackController:
                                   self.addon.getAddonInfo("version"), options=options)
         player, monitor = Player(), xbmc.Monitor()
         opened, stop_requested = False, False
-        reporter, guard, latest_sample = None, None, None
+        reporter, guard, latest_sample, extras = None, None, None, None
         stage, last_notice = "planning", 0
+        self.next_action = None
         self.last_progress_error = None
 
         def start_reporter():
@@ -661,6 +693,9 @@ class PlaybackController:
                         player.setSubtitleStream(embedded_index)
                         player.showSubtitles(True)
             stage = "polling"
+            if not player.finished:
+                extras = self._extras(player, item, plan, options, file_id, log_event)
+            extras_total, extras_total_at = None, 0.0
             revision = player.state_revision
             unavailable_since = None
             recovery = StallRecovery()
@@ -722,6 +757,23 @@ class PlaybackController:
                     if target is not None:
                         log_event("stall_recovery_seek", current)
                         player.seekTime(target)
+                if extras is not None and not player.finished:
+                    if total is not None or time.monotonic() - extras_total_at >= 5:
+                        extras_total_at = time.monotonic()
+                        if total is None:
+                            try:
+                                total = player.getTotalTime()
+                            except (AttributeError, RuntimeError):
+                                total = None
+                        extras_total = total or extras_total
+                    command = extras.tick(latest_sample[0], latest_sample[1], extras_total)
+                    if command and command.get("native"):
+                        xbmc.executebuiltin("ActivateWindow({})".format(command["native"]))
+                    elif command and command.get("stop"):
+                        self.next_action = command
+                        log_event("stop_for_" + command["stop"], current)
+                        stop_local()
+                        break
                 if revision != player.state_revision:
                     revision = player.state_revision
                     log_event("paused" if player.paused else "resumed", current)
@@ -743,6 +795,8 @@ class PlaybackController:
             if not already_finished:
                 xbmcgui.Dialog().ok("Silo — playback", "Kodi could not finish setting up this playback.")
         finally:
+            if extras is not None:
+                extras.close()
             stop_local()
             source_position = session.position
             if latest_sample is not None and session.plan:

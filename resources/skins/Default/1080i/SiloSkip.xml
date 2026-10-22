@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<window type="dialog">
+  <defaultcontrol always="true">100</defaultcontrol>
+  <coordinates><left>0</left><top>0</top></coordinates>
+  <animation effect="fade" start="0" end="100" time="200">WindowOpen</animation>
+  <animation effect="fade" start="100" end="0" time="150">WindowClose</animation>
+  <controls>
+    <control type="button" id="100">
+      <left>1524</left><top>900</top><width>300</width><height>76</height>
+      <label>$INFO[Window.Property(silo.skip_label)]</label>
+      <font>font25_title</font><align>center</align><aligny>center</aligny>
+      <textcolor>FF0B0B0C</textcolor><focusedcolor>FF0B0B0C</focusedcolor>
+      <texturefocus border="38" colordiffuse="FFEDEDED">pill76.png</texturefocus>
+      <texturenofocus border="38" colordiffuse="E6EDEDED">pill76.png</texturenofocus>
+      <onleft>100</onleft><onright>100</onright><onup>100</onup><ondown>100</ondown>
+    </control>
+  </controls>
+</window>

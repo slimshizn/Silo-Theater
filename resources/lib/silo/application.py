@@ -15,6 +15,7 @@ from .api import ApiError, SiloClient
 from .auth import AuthController, DeviceAuthCancelled, DeviceAuthExpired, NATIVE_PROVIDER_ID
 from .media import available_versions, default_version, format_time, is_multipart, resume_position, version_label, version_name
 from .playback import PlaybackController
+from . import present
 from .present import avatar_image, video_items
 from .settings import read_options
 from .storage import SessionStore, StorageError
@@ -28,6 +29,7 @@ class Application:
         self.monitor = xbmc.Monitor()
         self.store = None
         self.client = None
+        self.profile = {}
         self.profile_name = ""
         self.profile_avatar = ""
         self.server_name = ""
@@ -74,6 +76,7 @@ class Application:
             return
         self._recover_playback()
         self.ensure_display_setup()
+        self.sync_keymap()
 
         while not self.monitor.abortRequested():
             window = HomeWindow("SiloHome.xml", self.addon.getAddonInfo("path"),
@@ -87,6 +90,10 @@ class Application:
                     return
                 self._recover_playback()
             elif action == "settings":
+                from .ui_settings import open_settings
+
+                if self.guard(lambda: open_settings(self)) != "device":
+                    continue
                 self.addon.openSettings()
                 if self.addon.getSetting("server_url").strip() != server_url:
                     self._run()
@@ -278,6 +285,7 @@ class Application:
             if not profile_id:
                 raise ApiError(401, "This temporary session has no bound profile.")
             self.client.select_profile(profile_id, self.store.get("profile_token"))
+            self.profile = {"id": profile_id}
             self.profile_name = "Temporary session"
             return True
         profiles = self.client.profiles().get("items", [])
@@ -316,6 +324,7 @@ class Application:
                 return False
             token = verification["profile_token"]
         self.client.select_profile(profile["id"], token)
+        self.profile = dict(profile)
         self.profile_name = str(profile["name"])
         self.profile_avatar = avatar_image(profile.get("avatar_url"))
         self._libraries = None  # Library access differs per profile.
@@ -456,7 +465,7 @@ class Application:
                 detail["user_data"] = progress
         self._after_playback_item = (self._playback_item_key(item, file_id), detail)
 
-    def play(self, item, resume=None, file_id=None, subtitle_index=None):
+    def play(self, item, resume=None, file_id=None, subtitle_index=None, start_at=None):
         """Generic Play follows preferences; explicit Resume/Start keeps its intent.
 
         Return the chosen file so the detail screen can retain it after refresh.
@@ -466,7 +475,7 @@ class Application:
         if not self.is_playable(item):
             return None
         self._after_playback_item = None
-        options = self.options()
+        options = dict(self.options(), auto_skip=self.auto_skip())
         if isinstance(subtitle_index, int) and not isinstance(subtitle_index, bool) and subtitle_index >= 0:
             options = dict(options, subtitle_track_index=subtitle_index)
         version = default_version(item, options["file_selection"], file_id)
@@ -501,12 +510,61 @@ class Application:
             else:
                 resume = behavior == "resume"
         start_position = None if resume and multipart else position if resume else 0.0
+        if start_at is not None:
+            start_position = start_at
         controller = PlaybackController(self.client, self.addon)
+        controller.next_lookup, controller.image = self.next_episode, self.image
         try:
             controller.play(selected_item, start_position=start_position, file_id=file_id, options=options)
         finally:
             self._cache_playback_item(selected_item, file_id, getattr(controller, "last_result", None))
+        action = getattr(controller, "next_action", None)
+        if isinstance(action, dict) and action.get("stop") == "version":
+            # The player menu switched files: continue on the new one where playback was.
+            self.play(selected_item, resume=True, file_id=action["file_id"], subtitle_index=subtitle_index,
+                      start_at=action.get("position"))
+        elif isinstance(action, dict) and action.get("stop") == "next" and action.get("item"):
+            # Up next: open the episode fresh so its files, markers and progress are current.
+            self.play(self.client.item(action["item"]["content_id"]), resume=True)
         return file_id
+
+    def next_episode(self, item):
+        """The episode after ``item`` in its series, crossing into the next season."""
+        series_id = item.get("series_id")
+        try:
+            season, number = int(item.get("season_number")), int(item.get("episode_number"))
+        except (TypeError, ValueError):
+            return None
+        if not series_id:
+            return None
+        seasons = [entry for entry in present.ordered_seasons(self.client.seasons(series_id).get("items", []))
+                   if entry.get("season_number") not in (0, "0")]
+        for index, entry in enumerate(seasons):
+            try:
+                entry_number = int(entry.get("season_number"))
+            except (TypeError, ValueError):
+                continue
+            if entry_number < season:
+                continue
+            episodes = sorted(self.episodes(entry), key=lambda episode: int(episode.get("episode_number") or 0))
+            for episode in episodes:
+                if entry_number > season or int(episode.get("episode_number") or 0) > number:
+                    return dict(episode, series_id=series_id, series_title=item.get("series_title"),
+                                season_number=episode.get("season_number", entry_number))
+        return None
+
+    def sync_keymap(self):
+        """Add or remove the Menu-key keymap to match the device setting."""
+        from .keymap import sync
+
+        folder = xbmcvfs.translatePath("special://userdata/keymaps/")
+        if not os.path.isabs(str(folder)):
+            return  # Not resolved by a real Kodi.
+        try:
+            if sync(folder, self.options().get("player_menu_key", True), self.addon.getAddonInfo("path")):
+                xbmc.executebuiltin("Action(reloadkeymaps)")
+        except OSError:
+            xbmc.log("[Silo] Could not update the player menu keymap", xbmc.LOGWARNING)
 
     @staticmethod
     def is_playable(item):
@@ -515,6 +573,20 @@ class Application:
     @staticmethod
     def resume_seconds(item):
         return resume_position(item)
+
+    def update_profile(self, changes):
+        """Save the active profile's own playback preferences on the server."""
+        profile_id = (getattr(self, "profile", None) or {}).get("id")
+        if profile_id is None:
+            raise ApiError(403, "Settings are unavailable for this sign-in.")
+        updated = self.client.update_profile(profile_id, changes)
+        self.profile = dict(self.profile, **(updated if isinstance(updated, dict) else changes))
+        return self.profile
+
+    def auto_skip(self):
+        """The profile's auto-skip switches, as the player reads them."""
+        profile = getattr(self, "profile", None) or {}
+        return {kind: profile.get("auto_skip_" + kind) is True for kind in ("intro", "credits", "recap")}
 
     def image(self, item, kind):
         return self.client.image_url(item, kind) if isinstance(item, dict) else ""
