@@ -257,6 +257,76 @@ class ApplicationFlowTests(unittest.TestCase):
             self.app.play(item, resume=False)
             self.assertEqual(player.return_value.play.call_args.kwargs["start_position"], 0)
 
+    def test_post_stop_details_use_confirmed_sample_when_catalog_becomes_unreachable(self):
+        original, fresh = movie_item(30), movie_item(75)
+        self.app.client.item.side_effect = [fresh, ApiError(0, "Catalog is now unreachable")]
+        window = ui.DetailsWindow("SiloDetails.xml", ".")
+        window.application, window.item = self.app, original
+        with patch.object(application_module, "PlaybackController") as controller:
+            controller.return_value.last_result = {"has_sample": True, "position_seconds": 125.75, "ended": False}
+            window.onClick(100)
+        # Only the preplay detail request is allowed; the queued failure is never read.
+        self.app.client.item.assert_called_once_with("movie:1", file_id="file-a")
+        self.assertEqual(window.item["user_data"]["position_seconds"], 125.75)
+        self.assertEqual(window.item["user_data"]["last_file_id"], "file-a")
+        self.assertEqual(window.properties["silo.resume_label"], "Resume from 2:05")
+        self.assertEqual(window.selected_file_id, "file-a")
+        self.app.dialog.ok.assert_not_called()
+
+    def test_unconfirmed_or_missing_controller_result_preserves_server_progress(self):
+        fresh = movie_item(125.75)
+        self.app.client.item.return_value = fresh
+        results = (None, {}, {"has_sample": False, "position_seconds": 0, "ended": True},
+                   {"has_sample": True, "position_seconds": float("nan"), "ended": True})
+        for result in results:
+            with self.subTest(result=result), patch.object(application_module, "PlaybackController") as controller:
+                controller.return_value.last_result = result
+                self.app.play(movie_item(), resume=False)
+            cached = self.app.item_after_playback(movie_item(), "file-a")
+            self.assertEqual(cached["user_data"], fresh["user_data"])
+            self.assertEqual(self.app.resume_seconds(cached), 125.75)
+        self.assertEqual(fresh["user_data"]["position_seconds"], 125.75)
+
+    def test_confirmed_ended_result_hides_resume_and_remembers_explicit_file(self):
+        fresh = movie_item(75, multiple=True)
+        self.app.client.item.return_value = fresh
+        with patch.object(application_module, "PlaybackController") as controller:
+            controller.return_value.last_result = {"has_sample": True, "position_seconds": 7199.5, "ended": True}
+            self.app.play(fresh, file_id="file-b")
+        cached = self.app.item_after_playback(fresh, "file-b")
+        self.assertTrue(cached["user_data"]["played"])
+        self.assertFalse(cached["user_data"]["is_in_progress"])
+        self.assertEqual(cached["user_data"]["last_file_id"], "file-b")
+        self.assertEqual(self.app.resume_seconds(cached), 0)
+        self.assertNotIn("played", fresh["user_data"])
+
+    def test_part_local_samples_do_not_overwrite_global_item_progress(self):
+        fresh = movie_item(5000)
+        fresh["versions"][0].update(presentation_kind="multipart_movie", presentation_part_index=2, presentation_part_total=2)
+        self.app.client.item.return_value = fresh
+        with patch.object(application_module, "PlaybackController") as controller:
+            controller.return_value.last_result = {"has_sample": True, "position_seconds": 120, "ended": True}
+            self.app.play(fresh, resume=True)
+        cached = self.app.item_after_playback(fresh, "file-a")
+        self.assertEqual(cached["user_data"], fresh["user_data"])
+
+    def test_cache_miss_and_profile_change_never_fall_back_to_http(self):
+        item = movie_item()
+        self.app.store["profile_id"] = "first"
+        self.app._cache_playback_item(item, "file-a", {"has_sample": True, "position_seconds": 500, "ended": False})
+        self.app.client.item.side_effect = AssertionError("Post-stop HTTP is forbidden")
+        self.app.store["profile_id"] = "second"
+        fallback = self.app.item_after_playback(item, "file-a")
+        self.assertEqual(fallback, item)
+        self.assertIsNot(fallback, item)
+        self.app.client.item.assert_not_called()
+
+    def test_manual_file_refresh_still_requests_fresh_metadata(self):
+        item = movie_item(multiple=True)
+        self.app.client.item.return_value = item
+        self.assertIs(self.app.refresh_item(item, "file-b"), item)
+        self.app.client.item.assert_called_once_with("movie:1", file_id="file-b")
+
     def test_continue_watching_card_opens_playable_episode_but_library_series_stays_series(self):
         episode = {"content_id": "episode:2", "type": "episode", "title": "Episode 2"}
         card = {"content_id": "series:1", "type": "series", "play_content_id": "episode:2", "item_source": "next_up"}
@@ -335,11 +405,13 @@ class WindowTests(unittest.TestCase):
         window.item = original
         updated = movie_item(75)
         self.app.play.return_value = "file-a"
-        self.app.refresh_item.return_value = updated
+        self.app.item_after_playback.return_value = updated
         window.onClick(100)
         self.app.play.assert_called_once_with(original, resume=None, file_id=None)
         self.assertEqual(window.properties["silo.resume_label"], "Resume from 1:15")
         self.assertIs(window.item, updated)
+        self.app.refresh_item.assert_not_called()
+        self.app.item_after_playback.assert_called_once_with(original, "file-a")
 
     def test_manual_file_choice_is_visible_and_preserved_after_playback_refresh(self):
         window = ui.DetailsWindow("SiloDetails.xml", ".")
@@ -347,6 +419,7 @@ class WindowTests(unittest.TestCase):
         self.app.choose_file.return_value = "file-b"
         refreshed = movie_item(120, multiple=True)
         self.app.refresh_item.return_value = refreshed
+        self.app.item_after_playback.return_value = refreshed
         window.onClick(103)
         self.assertEqual(window.selected_file_id, "file-b")
         self.assertIn("Example.HD.mkv", window.properties["silo.file_label"])

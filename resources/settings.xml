@@ -9,7 +9,7 @@
           <constraints><allowempty>true</allowempty></constraints>
           <control type="edit" format="string"><heading>32001</heading></control>
         </setting>
-        <setting id="sign_in_method" type="string" label="32003">
+        <setting id="sign_in_method" type="string" label="32003" help="32006">
           <level>0</level>
           <default>password</default>
           <constraints>

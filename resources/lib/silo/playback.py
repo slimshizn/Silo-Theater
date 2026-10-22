@@ -1,12 +1,15 @@
 """Native Silo playback core and a lazily imported Kodi player adapter."""
 
 import math
+import threading
 import time
 import uuid
 from urllib.parse import quote, urlencode, urljoin, urlsplit
 
 from .api import ApiError
 from .capabilities import playback_capabilities
+from .recovery import forget_session, remember_session, remember_stop
+from .storage import StorageError
 
 
 class PlaybackError(Exception):
@@ -59,7 +62,7 @@ def kodi_media_url(server_url, stream):
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.2.0", options=None):
+    def __init__(self, client, mode="auto", version="0.2.1", options=None):
         self.client, self.mode, self.version = client, mode, version
         self.options = dict(options or {})
         # /api/v2 calls this installation_id, but it identifies the SERVER.
@@ -67,6 +70,7 @@ class PlaybackSession:
         self.installation_id = None
         self.server_capabilities = None
         self.session_id = None
+        self.recovery_key = None
         self.plan = None
         self.sequence = 0
         self.pending_progress = None
@@ -131,6 +135,12 @@ class PlaybackSession:
             raise PlaybackError("The playback response is missing its session identifier.")
         # Keep the id before validation so the caller can release a refused plan.
         self.plan = plan
+        try:
+            self.recovery_key = remember_session(self.client, self.installation_id, self.session_id)
+        except StorageError as error:
+            # Media must not open without a durable cleanup record. The live
+            # session id is retained so finally can still release this attempt.
+            raise PlaybackError(str(error)) from error
         if plan.get("protocol_version") != 3 or plan.get("delivery") != "original_http":
             raise PlaybackError("This build currently supports original-file direct play only.")
         if any(t.get("executor") == "client" for t in plan.get("transformations", [])):
@@ -189,10 +199,27 @@ class PlaybackSession:
             if self.has_sample:
                 self.stop_body.update(sequence=self.sequence, position=self.position,
                                       is_paused=self.paused)
-        receipt = self.client.request("DELETE", self.path, self.stop_body)
+        # If journaling itself refused a just-created attempt (capacity/I/O),
+        # still try to retire that unopened attempt with its scoped client.
+        recorded = remember_stop(self.client, self.recovery_key, self.stop_body) if self.recovery_key else self.stop_body
+        if recorded is None:
+            raise ApiError(403, "The playback sign-in or selected profile changed.", "playback_scope_changed")
+        self.stop_body = recorded
+        try:
+            receipt = self.client.request("DELETE", self.path, self.stop_body)
+        except ApiError as error:
+            if error.status not in (404, 410):
+                raise
+            if self.recovery_key:
+                forget_session(self.client, self.recovery_key)
+            self.session_id = None
+            return
         if (not isinstance(receipt, dict) or receipt.get("outcome") not in ("stopped", "replayed")
-                or receipt.get("stop_id", self.stop_body["stop_id"]) != self.stop_body["stop_id"]):
+                or receipt.get("outcome") == "stopped"
+                and receipt.get("stop_id", self.stop_body["stop_id"]) != self.stop_body["stop_id"]):
             raise PlaybackError("The server did not confirm that playback stopped.")
+        if self.recovery_key:
+            forget_session(self.client, self.recovery_key)
         self.session_id = None
 
 
@@ -230,11 +257,127 @@ class ResumeGuard:
         return False
 
 
+class ProgressReporter:
+    """Serialize HTTP reports away from Kodi's callback and polling paths.
+
+    Only immutable position/pause samples cross the thread boundary. The worker
+    never receives a Kodi Player, Monitor, window, logger, or callback. Its last
+    sample replaces queued samples, so a slow server cannot build a backlog.
+    ``close`` requests a final stop and returns immediately; tests can use wait.
+    """
+
+    def __init__(self, session, interval=10, clock=None, owner_timeout=5, startup_timeout=30):
+        self.session = session
+        self.interval = interval
+        self.clock = clock or time.monotonic
+        self.owner_timeout = owner_timeout
+        self.startup_timeout = startup_timeout
+        self._created_at = self.clock()
+        self._updated_at = None
+        self._condition = threading.Condition()
+        self._latest = None
+        self._closing = False
+        self._error = None
+        self._fatal = False
+        self._owner_stalled = False
+        self._notice = None
+        self._serial = 0
+        self._done = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="SiloPlaybackReports", daemon=True)
+        self._thread.start()
+
+    def submit(self, position, paused=False):
+        sample = (_number(position), bool(paused))
+        with self._condition:
+            if not self._closing:
+                self._latest = sample
+                self._updated_at = self.clock()
+                self._condition.notify()
+
+    def close(self):
+        with self._condition:
+            self._closing = True
+            self._condition.notify()
+
+    def wait(self, timeout=None):
+        """Optional synchronization for tests; the Kodi controller never waits."""
+        return self._done.wait(timeout)
+
+    def status(self):
+        with self._condition:
+            return self._serial, self._notice, self._fatal, self._error
+
+    def _publish(self, notice, error=None):
+        with self._condition:
+            self._serial += 1
+            self._notice = "controller_stalled" if self._owner_stalled else notice
+            self._error = PlaybackError("Kodi stopped reporting its playback position.") if self._owner_stalled else error
+            self._fatal = self._owner_stalled or bool(isinstance(error, ApiError) and (
+                error.status in (401, 403, 404, 410) or error.code == "installation_changed"))
+
+    def _finish(self, sample):
+        if sample is not None:
+            self.session.record_position(*sample)
+        for attempt in range(2):
+            try:
+                self.session.stop()
+                self._publish("stop_confirmed")
+                return
+            except (ApiError, OSError, PlaybackError) as error:
+                transient = isinstance(error, OSError) or isinstance(error, ApiError) and (
+                    error.status in (0, 408, 429) or error.status >= 500)
+                if attempt == 0 and transient:
+                    continue
+                self._publish("stop_failed", error)
+                return
+
+    def _run(self):
+        next_report, reported_pause = 0.0, None
+        try:
+            while True:
+                with self._condition:
+                    while not self._closing:
+                        now = self.clock()
+                        deadline = (self._updated_at + self.owner_timeout if self._updated_at is not None
+                                    else self._created_at + self.startup_timeout)
+                        if now >= deadline:
+                            # Repeating a stale last position would otherwise
+                            # keep Silo alive while Kodi's polling path hangs.
+                            self._owner_stalled = True
+                            self._closing = True
+                            self._publish("controller_stalled")
+                            break
+                        if (self._latest is not None and not self._fatal
+                                and (now >= next_report or self._latest[1] != reported_pause)):
+                            break
+                        delay = max(0.01, min(0.25, next_report - now)) if self._latest else 0.25
+                        self._condition.wait(delay)
+                    closing, sample = self._closing, self._latest
+                if closing:
+                    self._finish(sample)
+                    return
+                try:
+                    self.session.progress(*sample)
+                    self._publish("progress_accepted")
+                except (ApiError, OSError, PlaybackError) as error:
+                    self._publish("progress_failed", error)
+                reported_pause = sample[1]
+                next_report = self.clock() + self.interval
+        except Exception:
+            # Keep diagnostics deterministic; arbitrary exception strings can
+            # contain signed media addresses or credentials.
+            self._publish("reporter_failed", PlaybackError("Playback reporting failed."))
+        finally:
+            self._done.set()
+
+
 class PlaybackController:
-    """Own Kodi playback and heartbeat until the user stops or playback ends."""
+    """Poll Kodi locally while a separate worker reports server progress."""
 
     def __init__(self, client, addon):
         self.client, self.addon = client, addon
+        self.last_result = None
+        self.last_reporter = None
 
     def play(self, item, start_position=None, file_id=None, options=None):
         import xbmc
@@ -242,60 +385,87 @@ class PlaybackController:
         from .settings import read_options
 
         options = dict(read_options(self.addon) if options is None else options)
+        self.last_result = None
+        self.last_reporter = None
 
         class Player(xbmc.Player):
+            # Kodi dispatches these asynchronously. Callbacks only change Python
+            # data; all native player calls remain on the polling path.
             started = False
             finished = False
             failed = False
+            ended = False
             paused = False
             state_revision = 0
-            latest_time = None
-
-            def capture_time(self, closing=False):
-                try:
-                    value = _number(self.getTime())
-                    # Kodi may return zero after it has torn down playback.
-                    if closing and value == 0 and self.latest_time is not None and self.latest_time > 0:
-                        return
-                    self.latest_time = value
-                except (RuntimeError, TypeError, ValueError, PlaybackError):
-                    pass
 
             def onAVStarted(self):
                 self.started = True
 
             def onPlayBackStopped(self):
-                self.capture_time(closing=True)
                 self.finished = True
 
             def onPlayBackEnded(self):
-                self.capture_time(closing=True)
+                self.ended = True
                 self.finished = True
 
             def onPlayBackError(self):
-                self.capture_time(closing=True)
                 self.failed = True
                 self.finished = True
 
             def onPlayBackPaused(self):
                 self.paused = True
-                self.capture_time()
                 self.state_revision += 1
 
             def onPlayBackResumed(self):
                 self.paused = False
-                self.capture_time()
                 self.state_revision += 1
+
+        def log_event(event, position=None, error=None):
+            message = "[Silo] playback event=" + event
+            if position is not None:
+                message += " position={:.3f}".format(position)
+            if isinstance(error, ApiError):
+                code = "".join(char for char in str(error.code) if char.isalnum() or char == "_")[:64]
+                message += " status={} code={}".format(int(error.status), code or "unspecified")
+            xbmc.log(message, xbmc.LOGWARNING if error is not None else xbmc.LOGINFO)
 
         session = PlaybackSession(self.client, options.get("dv_mode", "auto"),
                                   self.addon.getAddonInfo("version"), options=options)
         player, monitor = Player(), xbmc.Monitor()
-        opened = False
-        guard = None
+        opened, stop_requested = False, False
+        reporter, guard, latest_sample = None, None, None
+        stage, last_notice = "planning", 0
         self.last_progress_error = None
+
+        def start_reporter():
+            clone = getattr(self.client, "reporting_client", None)
+            session.client = clone(timeout=1.5) if clone is not None else self.client
+            worker = ProgressReporter(session, 5 if options.get("progress_interval") == 5 else 10)
+            self.last_reporter = worker
+            return worker
+
+        def stop_local():
+            nonlocal stop_requested
+            if opened and not player.finished and not stop_requested:
+                stop_requested = True
+                try:
+                    player.stop()
+                except RuntimeError:
+                    log_event("native_stop_unavailable")
+
         try:
+            version = "".join(char for char in self.addon.getAddonInfo("version") if char in "0123456789.")[:24]
+            log_event("begin_v" + (version or "unknown"))
             plan = session.start(str(file_id) if file_id is not None else select_file(item), start_position)
+            log_event("plan_ready", session.position)
             path = kodi_media_url(self.client.server_url, plan["stream"])
+            # Credential refresh for subtitle setup happens before media opens.
+            subtitle = plan.get("subtitle") or {}
+            subtitle_path = None
+            if options.get("subtitle_mode", "server") != "off" and subtitle.get("artifact"):
+                subtitle_path = kodi_media_url(self.client.server_url,
+                    {"url": subtitle["artifact"]["url"], "headers": self.client.headers()})
+            reporter = start_reporter()
             listitem = xbmcgui.ListItem(label=item.get("title", "Silo"), path=path)
             tag = listitem.getVideoInfoTag()
             tag.setTitle(item.get("title", "Silo"))
@@ -304,100 +474,112 @@ class PlaybackController:
             if plan["stream"].get("mime_type"):
                 listitem.setMimeType(plan["stream"]["mime_type"])
             listitem.setContentLookup(False)
+            stage = "opening"
             player.play(path, listitem)
             opened = True
             deadline = time.monotonic() + 30
             while not player.started and not player.finished:
                 if monitor.waitForAbort(0.2):
-                    player.stop()
+                    stop_local()
                     return
                 if time.monotonic() >= deadline:
-                    player.stop()
                     raise PlaybackError("Kodi did not start playback within 30 seconds.")
             if player.failed:
                 raise PlaybackError("Kodi could not open the original media file.")
             if player.finished:
                 return
+            log_event("av_started")
             start = _number(plan["timeline"]["player_start_seconds"])
             guard = ResumeGuard(start)
+            stage = "resume_seek"
             if start:
                 player.seekTime(start)
+            stage = "track_setup"
             audio_index = (plan.get("selected_tracks", {}).get("audio") or {}).get("index")
-            if audio_index is not None and 0 <= audio_index < len(player.getAvailableAudioStreams()):
-                player.setAudioStream(audio_index)
-            subtitle = plan.get("subtitle") or {}
-            if options.get("subtitle_mode", "server") == "off" or subtitle.get("mode") == "off":
-                player.showSubtitles(False)
-            elif subtitle.get("artifact"):
-                artifact = subtitle["artifact"]
-                player.setSubtitles(kodi_media_url(self.client.server_url,
-                                                  {"url": artifact["url"],
-                                                   "headers": self.client.headers()}))
-            interval = 5 if options.get("progress_interval") == 5 else 10
-            next_report = 0.0
-            reported_revision = -1
+            if not player.finished and audio_index is not None:
+                streams = player.getAvailableAudioStreams()
+                if not player.finished and 0 <= audio_index < len(streams):
+                    player.setAudioStream(audio_index)
+            if not player.finished:
+                if options.get("subtitle_mode", "server") == "off" or subtitle.get("mode") == "off":
+                    player.showSubtitles(False)
+                elif subtitle_path:
+                    player.setSubtitles(subtitle_path)
+            stage = "polling"
+            revision = player.state_revision
+            unavailable_since = None
             while not player.finished:
                 if monitor.waitForAbort(0.25):
-                    player.capture_time()
-                    if player.latest_time is not None and guard.accept(player.latest_time):
-                        session.record_position(player.latest_time, player.paused)
-                    player.stop()
+                    stop_local()
                     break
+                # Monitor dispatch can deliver stop/end; never query a player
+                # after that notification has arrived.
+                if player.finished:
+                    break
+                serial, notice, fatal, error = reporter.status()
+                if serial != last_notice:
+                    last_notice = serial
+                    self.last_progress_error = error
+                    log_event(notice, error=error)
+                if fatal:
+                    if notice == "controller_stalled":
+                        raise PlaybackError("Playback stopped after Kodi stopped reporting its position. Open the title again.")
+                    raise PlaybackError("The playback session ended or needs sign-in. Open the title again.")
                 try:
                     current = player.getTime()
                 except RuntimeError:
-                    if not player.isPlaying():
+                    # Native teardown can race this poll. No nested Kodi calls
+                    # are made to probe a player whose query just failed.
+                    if player.finished:
+                        break
+                    if unavailable_since is None:
+                        unavailable_since = time.monotonic()
+                        log_event("native_time_unavailable")
+                    elif time.monotonic() - unavailable_since >= 2:
+                        log_event("native_time_lost")
+                        # The native player is no longer queryable. Mark it
+                        # finished so cleanup does not probe or stop it again.
+                        player.finished = True
                         break
                     continue
+                unavailable_since = None
                 if player.finished:
                     break
                 if not guard.accept(current):
                     continue
-                player.latest_time = current
-                session.record_position(current, player.paused)
-                revision = player.state_revision
-                if time.monotonic() >= next_report or revision != reported_revision:
-                    try:
-                        session.progress(current, player.paused)
-                        self.last_progress_error = None
-                    except (ApiError, PlaybackError) as error:
-                        self.last_progress_error = error
-                        xbmc.log("Silo: playback progress was not accepted", xbmc.LOGWARNING)
-                        if isinstance(error, ApiError) and (error.status in (401, 403, 404, 410)
-                                                           or error.code == "installation_changed"):
-                            player.stop()
-                            raise PlaybackError("The playback session ended or needs sign-in. Open the title again.")
-                    reported_revision = revision
-                    next_report = time.monotonic() + interval
+                latest_sample = (_number(current), bool(player.paused))
+                reporter.submit(*latest_sample)
+                if revision != player.state_revision:
+                    revision = player.state_revision
+                    log_event("paused" if player.paused else "resumed", current)
             if player.failed:
+                log_event("native_error")
                 raise PlaybackError("Kodi reported a playback error.")
+            log_event("native_ended" if player.ended else "native_stopped",
+                      latest_sample[0] if latest_sample else None)
         except (ApiError, PlaybackError) as error:
-            if opened and player.isPlaying():
-                player.stop()
+            log_event("failure_" + stage, error=error)
+            stop_local()
             xbmcgui.Dialog().ok("Silo — playback", str(error))
+        except RuntimeError:
+            # A user stop can race AV/track setup. Keep exception strings out of
+            # diagnostics, and do not call native stop after its callback.
+            log_event("native_runtime_error_" + stage)
+            already_finished = player.finished
+            stop_local()
+            if not already_finished:
+                xbmcgui.Dialog().ok("Silo — playback", "Kodi could not finish setting up this playback.")
         finally:
-            # Capture while the player still exists; never ask a stopped player
-            # for a final zero and overwrite the latest valid sample with it.
-            if opened and player.isPlaying():
-                player.capture_time()
-            if guard is not None and player.latest_time is not None:
-                try:
-                    if guard.accept(player.latest_time):
-                        session.record_position(player.latest_time, player.paused)
-                except PlaybackError:
-                    pass
-            if opened and player.isPlaying():
-                player.stop()
-            for attempt in range(2):
-                try:
-                    session.stop()
-                    break
-                except ApiError as error:
-                    transient = error.status in (0, 408, 429) or error.status >= 500
-                    if attempt == 0 and transient and not monitor.waitForAbort(0.5):
-                        continue
-                    xbmc.log("Silo: unable to close playback session; server expiry will release it", xbmc.LOGWARNING)
-                    break
-                except PlaybackError:
-                    xbmc.log("Silo: unable to close playback session; server expiry will release it", xbmc.LOGWARNING)
-                    break
+            stop_local()
+            source_position = session.position
+            if latest_sample is not None and session.plan:
+                source_position = _number(latest_sample[0] + session.plan["timeline"]["timeline_offset_seconds"])
+            self.last_result = {"has_sample": latest_sample is not None,
+                                "position_seconds": source_position, "ended": bool(player.ended)}
+            if reporter is None and session.session_id is not None:
+                reporter = start_reporter()
+            if reporter is not None:
+                if latest_sample is not None:
+                    reporter.submit(*latest_sample)
+                reporter.close()
+                log_event("cleanup_queued", source_position if latest_sample else None)

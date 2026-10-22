@@ -122,6 +122,30 @@ class LoginTests(unittest.TestCase):
         result, _ = self.window(interact, server_url="https://silo.invalid", allow_code=False)
         self.assertIsNone(result)
 
+    def test_disabled_native_login_can_only_check_the_server_without_sending_a_password(self):
+        def interact(window):
+            self.assertEqual(window.properties["silo.allow_password"], "")
+            self.assertEqual(window.properties["silo.sign_in_label"], "Check server")
+            self.assertEqual(window.focus, CODE_CONTROL)
+            window.controls[PASSWORD_CONTROL].setText("must not escape")
+            window.onClick(SIGN_IN_CONTROL)
+
+        result, _ = self.window(interact, server_url="https://silo.invalid", allow_password=False)
+        self.assertEqual(result, {"action": "discover", "server_url": "https://silo.invalid", "username": ""})
+        with self.assertRaises(LoginValidationError):
+            login_submission("password", "https://silo.invalid", "alice", "secret", allow_password=False)
+
+    def test_server_remains_editable_when_no_native_sign_in_method_is_available(self):
+        def interact(window):
+            self.assertEqual(window.focus, SERVER_CONTROL)
+            window.controls[SERVER_CONTROL].setText("https://other-silo.invalid")
+            window.onClick(SIGN_IN_CONTROL)
+
+        result, _ = self.window(interact, server_url="https://silo.invalid", allow_password=False, allow_code=False)
+        self.assertEqual(result["action"], "discover")
+        self.assertEqual(result["server_url"], "https://other-silo.invalid")
+        self.assertNotIn("password", result)
+
     def test_back_cancels_and_clears_password(self):
         def interact(window):
             window.controls[PASSWORD_CONTROL].setText("must not persist")

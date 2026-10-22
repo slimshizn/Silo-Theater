@@ -4,14 +4,17 @@ from copy import deepcopy
 from pathlib import Path
 import sys
 from types import SimpleNamespace
+import threading
+import time
 import unittest
 from unittest.mock import patch
 from urllib.parse import parse_qs
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "resources/lib"))
 
-from silo.playback import PlaybackController, PlaybackError, PlaybackSession, ResumeGuard, kodi_media_url, select_file
+from silo.playback import PlaybackController, PlaybackError, PlaybackSession, ProgressReporter, ResumeGuard, kodi_media_url, select_file
 from silo.api import ApiError, SiloClient
+from silo.storage import StorageError
 from playback_contract import assert_contract
 
 
@@ -196,6 +199,88 @@ class PlaybackSessionTests(unittest.TestCase):
             session.stop()
         self.assertIsNotNone(session.session_id)
 
+    def test_playable_session_is_journaled_before_the_caller_can_open_media(self):
+        client = FakeClient()
+
+        def recorded(client_arg, installation_id, session_id):
+            self.assertIs(client_arg, client)
+            self.assertEqual(client.calls[-1][1], "/playback/start")
+            self.assertEqual(installation_id, client.capabilities["installation_id"])
+            self.assertEqual(session_id, "session/opaque id")
+            return "journal-key"
+
+        with patch("silo.playback.remember_session", side_effect=recorded) as remember:
+            session = PlaybackSession(client)
+            session.start("file-a")
+        self.assertEqual(session.recovery_key, "journal-key")
+        remember.assert_called_once()
+
+    def test_stop_records_before_http_and_uses_first_writers_exact_body(self):
+        client = FakeClient()
+        session = PlaybackSession(client)
+        session.start("file-a")
+        session.progress(20)
+        retained = {"installation_id": session.installation_id, "stop_id": "first-writer-id"}
+        written = []
+        request = client.request
+
+        def stop_recorded(client_arg, key, body):
+            written.append(key)
+            return deepcopy(retained)
+
+        def observed(method, path, body):
+            if method == "DELETE":
+                self.assertEqual(written, [session.recovery_key])
+                self.assertEqual(body, retained)
+            return request(method, path, body)
+
+        client.request = observed
+        with patch("silo.playback.remember_stop", side_effect=stop_recorded), patch("silo.playback.forget_session") as forget:
+            session.stop()
+        forget.assert_called_once_with(client, session.recovery_key)
+
+    def test_stop_missing_or_ended_server_session_removes_only_its_journal(self):
+        for status in (404, 410):
+            with self.subTest(status=status):
+                client = FakeClient()
+                session = PlaybackSession(client)
+                session.start("file-a")
+                request = client.request
+
+                def ended(method, path, body):
+                    if method == "DELETE":
+                        raise ApiError(status, "Already ended")
+                    return request(method, path, body)
+
+                client.request = ended
+                with patch("silo.playback.forget_session") as forget:
+                    session.stop()
+                self.assertIsNone(session.session_id)
+                forget.assert_called_once_with(client, session.recovery_key)
+
+    def test_lost_stop_response_keeps_the_journal_for_retry_or_next_launch(self):
+        client = FakeClient()
+        session = PlaybackSession(client)
+        session.start("file-a")
+        client.fail_stop_once = True
+        with patch("silo.playback.forget_session") as forget:
+            with self.assertRaises(OSError):
+                session.stop()
+        forget.assert_not_called()
+        self.assertIsNotNone(session.session_id)
+
+    def test_journal_capacity_refusal_still_releases_the_unopened_server_attempt(self):
+        client = FakeClient()
+        session = PlaybackSession(client)
+        with patch("silo.playback.remember_session", side_effect=StorageError("Too many unfinished sessions")):
+            with self.assertRaisesRegex(PlaybackError, "unfinished sessions"):
+                session.start("file-a")
+        self.assertIsNotNone(session.session_id)
+        session.stop()
+        self.assertEqual(client.calls[-1][0], "DELETE")
+        self.assertNotIn("position", client.calls[-1][2])
+        self.assertIsNone(session.session_id)
+
     def test_unopened_or_refused_plan_stop_does_not_overwrite_saved_progress(self):
         decision = playable_decision(source_start=300)
         decision["playback_plan"]["delivery"] = "hls"
@@ -253,7 +338,7 @@ class PlaybackSessionTests(unittest.TestCase):
                 return False
 
         xbmc = SimpleNamespace(Player=KodiPlayer, Monitor=lambda: object(),
-                               log=lambda *args: None, LOGWARNING=2)
+                               log=lambda *args: None, LOGWARNING=2, LOGINFO=1)
         xbmcgui = SimpleNamespace(Dialog=lambda: SimpleNamespace(ok=lambda *args: dialogs.append(args)))
         addon = SimpleNamespace(getSetting=lambda key: "auto", getAddonInfo=lambda key: "0.1.0")
         with patch.dict(sys.modules, {"xbmc": xbmc, "xbmcgui": xbmcgui}):
@@ -365,8 +450,10 @@ class ResumeGuardTests(unittest.TestCase):
 class ControllerTests(unittest.TestCase):
     def run_player(self, client, events, start=None, options=None, file_id=None):
         """Exercise the real controller against a Kodi callback/event double."""
-        state = SimpleNamespace(now=0.0, player=None, dialogs=[], subtitles=[], visibility=[], seeks=[])
+        state = SimpleNamespace(now=0.0, player=None, dialogs=[], subtitles=[], visibility=[], seeks=[],
+                                in_callback=False, logs=[], native_times=0)
         pending = list(events)
+        polling_thread = threading.get_ident()
 
         class KodiPlayer:
             def __init__(self):
@@ -379,16 +466,27 @@ class ControllerTests(unittest.TestCase):
                 self.onAVStarted()
 
             def isPlaying(self):
-                return self.playing
+                raise AssertionError("No teardown/native probe is needed")
 
             def getTime(self):
+                if state.in_callback or self.finished or threading.get_ident() != polling_thread:
+                    raise AssertionError("Native time queried from callback or after teardown")
+                state.native_times += 1
+                if getattr(self, "time_unavailable", False):
+                    raise RuntimeError("No current native media")
                 return self.position if self.playing else 0.0
 
             def seekTime(self, seconds):
                 state.seeks.append(seconds)
 
             def stop(self):
-                self.onPlayBackStopped()
+                if self.finished:
+                    raise AssertionError("Stopped player was queried again")
+                state.in_callback = True
+                try:
+                    self.onPlayBackStopped()
+                finally:
+                    state.in_callback = False
                 self.playing = False
 
             def showSubtitles(self, enabled):
@@ -399,20 +497,27 @@ class ControllerTests(unittest.TestCase):
 
         class Monitor:
             def waitForAbort(self, seconds):
+                # Yield to the real reporter thread; production Monitor does so.
+                time.sleep(0.001)
                 state.now += seconds
                 if pending:
                     position, action = pending.pop(0)
                     state.player.position = position
-                    if action == "pause":
-                        state.player.onPlayBackPaused()
-                    elif action == "resume":
-                        state.player.onPlayBackResumed()
-                    elif action == "stop":
-                        state.player.onPlayBackStopped()
-                        state.player.playing = False
-                    elif action == "end":
-                        state.player.onPlayBackEnded()
-                        state.player.playing = False
+                    state.player.time_unavailable = action == "unavailable"
+                    state.in_callback = True
+                    try:
+                        if action == "pause":
+                            state.player.onPlayBackPaused()
+                        elif action == "resume":
+                            state.player.onPlayBackResumed()
+                        elif action == "stop":
+                            state.player.onPlayBackStopped()
+                            state.player.playing = False
+                        elif action == "end":
+                            state.player.onPlayBackEnded()
+                            state.player.playing = False
+                    finally:
+                        state.in_callback = False
                 return False
 
         class ListItem:
@@ -431,16 +536,21 @@ class ControllerTests(unittest.TestCase):
             def setContentLookup(self, *args):
                 pass
 
-        xbmc = SimpleNamespace(Player=KodiPlayer, Monitor=Monitor, log=lambda *args: None, LOGWARNING=2)
+        xbmc = SimpleNamespace(Player=KodiPlayer, Monitor=Monitor,
+                               log=lambda message, level: state.logs.append(message), LOGWARNING=2, LOGINFO=1)
         xbmcgui = SimpleNamespace(ListItem=ListItem, Dialog=lambda: SimpleNamespace(ok=lambda *args: state.dialogs.append(args)))
-        addon = SimpleNamespace(getSetting=lambda key: "", getAddonInfo=lambda key: "0.2.0")
+        addon = SimpleNamespace(getSetting=lambda key: "", getAddonInfo=lambda key: "0.2.1")
         with patch.dict(sys.modules, {"xbmc": xbmc, "xbmcgui": xbmcgui}), patch("silo.playback.time.monotonic", side_effect=lambda: state.now):
-            PlaybackController(client, addon).play({"file_id": "default-file", "title": "A title"},
-                                                  start_position=start, file_id=file_id,
-                                                  options=options or {"progress_interval": 10, "subtitle_mode": "server"})
+            controller = PlaybackController(client, addon)
+            controller.play({"file_id": "default-file", "title": "A title"},
+                            start_position=start, file_id=file_id,
+                            options=options or {"progress_interval": 10, "subtitle_mode": "server"})
+            state.result = controller.last_result
+            if controller.last_reporter:
+                self.assertTrue(controller.last_reporter.wait(1), "Reporter did not finish")
         return state
 
-    def test_resume_waits_for_seek_before_first_sample_and_captures_final_callback(self):
+    def test_resume_waits_for_seek_then_stop_uses_cached_sample_without_native_callback_reads(self):
         client = FakeClient(playable_decision(source_start=180, player_start=180))
         state = self.run_player(client, [(0, None), (0.2, None), (180.1, None), (180.6, "stop")], start=180)
         self.assertEqual(state.seeks, [180])
@@ -448,7 +558,8 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(samples[0]["position"], 180.1)
         self.assertTrue(all(sample["position"] >= 180 for sample in samples))
         self.assertEqual(client.calls[-1][0], "DELETE")
-        self.assertEqual(client.calls[-1][2]["position"], 180.6)
+        self.assertEqual(client.calls[-1][2]["position"], 180.1)
+        self.assertEqual(state.result, {"has_sample": True, "position_seconds": 180.1, "ended": False})
         self.assertEqual(state.dialogs, [])
 
     def test_stop_before_seek_lands_never_overwrites_saved_resume(self):
@@ -469,7 +580,7 @@ class ControllerTests(unittest.TestCase):
         self.run_player(client, [(5, None), (5.25, "pause"), (5.25, "resume"), (5.7, "stop")], start=0)
         samples = [body for _, path, body in client.calls if path.endswith("/progress")]
         self.assertEqual([sample["is_paused"] for sample in samples], [False, True, False])
-        self.assertEqual(client.calls[-1][2]["position"], 5.7)
+        self.assertEqual(client.calls[-1][2]["position"], 5.25)
 
     def test_explicit_file_and_start_over_and_subtitle_off_options_are_executed(self):
         decision = playable_decision()
@@ -490,7 +601,7 @@ class ControllerTests(unittest.TestCase):
         self.run_player(client, [(0, None), (40, None), (41, "end")], start=None)
         body = next(body for _, path, body in client.calls if path == "/playback/start")
         self.assertNotIn("start_position", body)
-        self.assertEqual(client.calls[-1][2]["position"], 141)
+        self.assertEqual(client.calls[-1][2]["position"], 140)
 
     def test_final_stop_transient_failure_retries_same_identity_and_sample(self):
         client = FakeClient()
@@ -509,7 +620,192 @@ class ControllerTests(unittest.TestCase):
         stops = [body for method, _, body in client.calls if method == "DELETE"]
         self.assertEqual(len(stops), 2)
         self.assertEqual(stops[0], stops[1])
-        self.assertEqual(stops[0]["position"], 1.7)
+        self.assertEqual(stops[0]["position"], 1)
+
+    def test_network_progress_and_stop_never_run_on_the_polling_thread(self):
+        client = FakeClient()
+        request = client.request
+        polling_thread = threading.get_ident()
+        violations = []
+
+        def checked(method, path, body):
+            if (path.endswith("/progress") or method == "DELETE") and threading.get_ident() == polling_thread:
+                violations.append(path)
+            return request(method, path, body)
+
+        client.request = checked
+        state = self.run_player(client, [(1, None), (2, "stop")], start=0)
+        self.assertEqual(violations, [])
+        self.assertTrue(state.result["has_sample"])
+        self.assertTrue(any("event=begin_v0.2.1" in message for message in state.logs))
+
+    def test_missing_native_time_without_stop_callback_exits_within_two_seconds(self):
+        client = FakeClient()
+        state = self.run_player(client, [(0, "unavailable")], start=0)
+        self.assertLessEqual(state.now, 2.5)
+        self.assertTrue(any("event=native_time_lost" in message for message in state.logs))
+        self.assertFalse(state.result["has_sample"])
+        self.assertNotIn("position", client.calls[-1][2])
+
+
+class ProgressReporterTests(unittest.TestCase):
+    def test_close_does_not_wait_for_blocked_http_and_final_sample_is_coalesced(self):
+        client = FakeClient()
+        session = PlaybackSession(client)
+        session.start("file-a")
+        entered, release = threading.Event(), threading.Event()
+        request = client.request
+        report_threads = []
+        caller_thread = threading.get_ident()
+
+        def blocked(method, path, body):
+            report_threads.append(threading.get_ident())
+            if path.endswith("/progress"):
+                entered.set()
+                if not release.wait(2):
+                    raise AssertionError("Test did not release the simulated network")
+            return request(method, path, body)
+
+        client.request = blocked
+        worker = ProgressReporter(session)
+        try:
+            worker.submit(1)
+            self.assertTrue(entered.wait(1))
+            for position in range(2, 1001):
+                worker.submit(position)
+            started = time.perf_counter()
+            worker.close()
+            self.assertLess(time.perf_counter() - started, 0.05)
+            self.assertFalse(worker.wait(0.01))
+            release.set()
+            self.assertTrue(worker.wait(1))
+            reports = [body for _, path, body in client.calls if path.endswith("/progress")]
+            self.assertEqual(len(reports), 1)
+            self.assertEqual(client.calls[-1][0], "DELETE")
+            self.assertEqual(client.calls[-1][2]["position"], 1000)
+            self.assertTrue(all(identity != caller_thread for identity in report_threads))
+        finally:
+            release.set()
+            worker.close()
+            worker.wait(1)
+
+    def test_pause_changes_report_immediately_and_in_order_before_regular_heartbeat(self):
+        client = FakeClient()
+        session = PlaybackSession(client)
+        session.start("file-a")
+        condition = threading.Condition()
+        states = []
+        request = client.request
+
+        def observed(method, path, body):
+            if path.endswith("/progress"):
+                with condition:
+                    states.append(body["is_paused"])
+                    condition.notify_all()
+            return request(method, path, body)
+
+        client.request = observed
+        worker = ProgressReporter(session, interval=10)
+        try:
+            for count, paused in enumerate((False, True, False), 1):
+                worker.submit(12.5, paused)
+                with condition:
+                    self.assertTrue(condition.wait_for(lambda: len(states) >= count, timeout=1))
+            self.assertEqual(states, [False, True, False])
+        finally:
+            worker.close()
+            self.assertTrue(worker.wait(1))
+
+    def test_server_first_stop_replay_accepts_the_winning_stop_identity(self):
+        client = FakeClient()
+        session = PlaybackSession(client)
+        session.start("file-a")
+        request = client.request
+
+        def stopped_elsewhere(method, path, body):
+            if method == "DELETE":
+                return {"outcome": "replayed", "stop_id": "different-server-winning-stop"}
+            return request(method, path, body)
+
+        client.request = stopped_elsewhere
+        session.stop()
+        self.assertIsNone(session.session_id)
+
+    def test_stalled_polling_owner_stops_silo_and_keeps_the_fatal_notice_after_receipt(self):
+        client = FakeClient()
+        session = PlaybackSession(client)
+        session.start("file-a")
+        now, accepted = [0.0], threading.Event()
+        request = client.request
+
+        def observed(method, path, body):
+            result = request(method, path, body)
+            if path.endswith("/progress"):
+                accepted.set()
+            return result
+
+        client.request = observed
+        worker = ProgressReporter(session, clock=lambda: now[0])
+        try:
+            worker.submit(12)
+            self.assertTrue(accepted.wait(1))
+            now[0] = 5.1
+            self.assertTrue(worker.wait(1))
+            _, notice, fatal, _ = worker.status()
+            self.assertEqual(notice, "controller_stalled")
+            self.assertTrue(fatal)
+            self.assertEqual(client.calls[-1][0], "DELETE")
+            self.assertEqual(client.calls[-1][2]["position"], 12)
+            self.assertEqual(len([path for _, path, _ in client.calls if path.endswith("/progress")]), 1)
+        finally:
+            worker.close()
+            worker.wait(1)
+
+    def test_lost_controller_during_startup_stops_without_manufacturing_progress(self):
+        client = FakeClient()
+        session = PlaybackSession(client)
+        session.start("file-a")
+        now = [0.0]
+        worker = ProgressReporter(session, clock=lambda: now[0])
+        try:
+            now[0] = 31
+            self.assertTrue(worker.wait(1))
+            self.assertTrue(worker.status()[2])
+            self.assertEqual(client.calls[-1][0], "DELETE")
+            self.assertNotIn("position", client.calls[-1][2])
+        finally:
+            worker.close()
+            worker.wait(1)
+
+    def test_fresh_paused_samples_keep_the_session_alive_at_an_unchanged_position(self):
+        client = FakeClient()
+        session = PlaybackSession(client)
+        session.start("file-a")
+        now, accepted = [0.0], threading.Event()
+        request = client.request
+
+        def observed(method, path, body):
+            result = request(method, path, body)
+            if path.endswith("/progress"):
+                accepted.set()
+            return result
+
+        client.request = observed
+        worker = ProgressReporter(session, clock=lambda: now[0])
+        try:
+            worker.submit(12, paused=True)
+            self.assertTrue(accepted.wait(1))
+            for _ in range(10):
+                now[0] += 4
+                worker.submit(12, paused=True)
+                time.sleep(0.001)
+            self.assertFalse(worker.wait(0.01))
+            self.assertFalse(worker.status()[2])
+        finally:
+            worker.close()
+            self.assertTrue(worker.wait(1))
+        self.assertTrue(client.calls[-1][2]["is_paused"])
+        self.assertEqual(client.calls[-1][2]["position"], 12)
 
 
 class KodiMediaUrlTests(unittest.TestCase):

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 msgid ""
 msgstr ""
-"Project-Id-Version: script.silo 0.2.0\n"
+"Project-Id-Version: script.silo 0.2.1\n"
 "Language: en_GB\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -30,7 +30,11 @@ msgid "Code sign-in"
 msgstr ""
 
 msgctxt "#32005"
-msgid "Username and password"
+msgid "Silo account"
+msgstr ""
+
+msgctxt "#32006"
+msgid "Use the native account on your Silo server, or approve a sign-in code through Silo."
 msgstr ""
 
 msgctxt "#32010"

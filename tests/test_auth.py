@@ -32,7 +32,9 @@ class Client:
         self.start = {"device_code": "secret-code", "user_code": "1234-5678",
                       "verification_uri": "https://silo.example/activate", "expires_in": 30, "interval": 5}
         self.capability = {"state": "available"}
-        self.providers = {"password_login": True}
+        self.providers = {"password_login": True, "items": [
+            {"id": "local", "display_name": "Silo account", "mode": "credentials", "default": True},
+        ]}
 
     def device_start(self, *args):
         return self.start
@@ -158,6 +160,29 @@ class DeviceAuthTests(unittest.TestCase):
         client, clock, controller = self.setup_controller()
         client.capability = ApiError(404, "Missing")
         self.assertEqual(controller.available_methods(), ["password"])
+
+    def test_external_credentials_flag_does_not_advertise_native_password_login(self):
+        client, clock, controller = self.setup_controller()
+        client.providers = {"password_login": True, "items": [
+            {"id": "plugin-directory", "display_name": "Directory", "mode": "credentials", "default": True},
+        ]}
+        self.assertEqual(controller.available_methods(), ["device"])
+        client.capability = {"state": "disabled"}
+        self.assertEqual(controller.available_methods(), [])
+
+    def test_native_provider_is_detected_even_when_another_provider_is_default(self):
+        client, clock, controller = self.setup_controller()
+        client.providers["items"].insert(0, {"id": "plugin-directory", "mode": "credentials", "default": True})
+        client.providers["items"][1]["default"] = False
+        self.assertEqual(controller.available_methods(), ["device", "password"])
+
+    def test_native_credentials_require_an_explicit_provider_entry_and_known_mode(self):
+        client, clock, controller = self.setup_controller()
+        for items in (None, [], {}, [{"id": "local", "mode": "oauth"}], [{"id": "local"}],
+                      [{"id": "external", "mode": "credentials"}]):
+            with self.subTest(items=items):
+                client.providers = {"password_login": True, "items": items}
+                self.assertEqual(controller.available_methods(), ["device"])
 
     def test_discovery_connection_failures_are_not_hidden_as_password_only(self):
         client, clock, controller = self.setup_controller()

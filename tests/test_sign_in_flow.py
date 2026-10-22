@@ -26,6 +26,10 @@ class SignInFlowTests(unittest.TestCase):
         self.app.monitor.abortRequested.return_value = False
         self.app.store = Store()
         self.app.client = MagicMock(server_url=BASE)
+        self.app.client.device_capability.return_value = {"state": "available"}
+        self.app.client.auth_providers.return_value = {"password_login": True, "items": [
+            {"id": "local", "display_name": "Silo account", "mode": "credentials", "default": True},
+        ]}
         self.app.client.profiles.return_value = {"items": [
             {"id": "first", "name": "First", "has_pin": False},
             {"id": "saved", "name": "Saved", "has_pin": False},
@@ -77,7 +81,7 @@ class SignInFlowTests(unittest.TestCase):
                 patch.object(application_module, "AuthController") as auth:
             auth.return_value.available_methods.return_value = ["password"]
             self.assertTrue(self.login())
-        new_client.login.assert_called_once_with("alice", "private-password")
+        new_client.login.assert_called_once_with("alice", "private-password", provider="local")
         self.assertEqual(self.app.store["login_username"], "alice")
         self.assertEqual(self.app.store["login_username_server"], BASE)
         self.assertNotIn("private-password", repr(self.app.store))
@@ -106,6 +110,7 @@ class SignInFlowTests(unittest.TestCase):
         self.app.dialog.ok.assert_not_called()
         self.app.dialog.select.assert_not_called()
         self.assertNotIn("correct", repr(self.app.store))
+        self.assertTrue(all(call.kwargs.get("provider") == "local" for call in self.app.client.login.call_args_list))
 
     def test_canceling_login_does_not_send_credentials(self):
         self.prompt.return_value = None
@@ -118,8 +123,52 @@ class SignInFlowTests(unittest.TestCase):
         self.app.device_sign_in = MagicMock(side_effect=application_module.DeviceAuthCancelled())
         self.assertTrue(self.login(methods=["device", "password"]))
         self.assertIn("canceled", self.prompt.call_args.kwargs["message"])
-        self.app.client.login.assert_called_once_with("alice", "typed-only")
+        self.app.client.login.assert_called_once_with("alice", "typed-only", provider="local")
         self.app.dialog.select.assert_not_called()
+
+    def test_native_login_names_local_provider_even_when_external_credentials_are_default(self):
+        self.app.client.auth_providers.return_value["items"].insert(0, {
+            "id": "plugin-directory", "display_name": "Directory", "mode": "credentials", "default": True,
+        })
+        self.app.client.auth_providers.return_value["items"][1]["default"] = False
+        self.prompt.return_value = self.form()
+        self.assertTrue(self.login())
+        self.app.client.login.assert_called_once_with("alice", "typed-only", provider="local")
+
+    def test_external_only_credentials_are_never_used_as_password_fallback(self):
+        self.app.client.auth_providers.return_value = {"password_login": True, "items": [
+            {"id": "plugin-directory", "display_name": "Directory", "mode": "credentials", "default": True},
+        ]}
+        self.prompt.side_effect = [self.form(), None]
+        self.assertFalse(self.login())
+        self.app.client.login.assert_not_called()
+        self.assertFalse(self.prompt.call_args.kwargs["allow_password"])
+        self.assertTrue(self.prompt.call_args.kwargs["allow_code"])
+        self.assertIn("Silo account sign-in is unavailable", self.prompt.call_args.kwargs["message"])
+
+    def test_native_password_failure_does_not_try_another_provider(self):
+        self.app.client.auth_providers.return_value["items"].append({
+            "id": "plugin-directory", "mode": "credentials", "default": False,
+        })
+        self.app.client.login.side_effect = ApiError(401, "Incorrect Silo account password.")
+        self.prompt.side_effect = [self.form(password="wrong"), None]
+        self.assertFalse(self.login())
+        self.app.client.login.assert_called_once_with("alice", "wrong", provider="local")
+        self.assertEqual(self.prompt.call_args.kwargs["message"], "Incorrect Silo account password.")
+
+    def test_check_server_can_move_from_disabled_native_login_to_another_server(self):
+        new_url = "https://new-silo.example"
+        new_client = MagicMock(server_url=new_url)
+        new_client.device_capability.return_value = {"state": "available"}
+        new_client.auth_providers.return_value = {"password_login": True, "items": [
+            {"id": "local", "display_name": "Silo account", "mode": "credentials", "default": True},
+        ]}
+        self.prompt.side_effect = [self.form(action="discover", server_url=new_url), self.form(server_url=new_url)]
+        with patch.object(application_module, "SiloClient", return_value=new_client):
+            self.assertTrue(self.login(methods=["device"]))
+        self.assertFalse(self.prompt.call_args_list[0].kwargs["allow_password"])
+        self.assertTrue(self.prompt.call_args_list[1].kwargs["allow_password"])
+        new_client.login.assert_called_once_with("alice", "typed-only", provider="local")
 
     def test_remembered_username_is_bound_to_its_server(self):
         self.app.store.update(login_username="previous-user", login_username_server="https://other.example")

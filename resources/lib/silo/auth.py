@@ -7,6 +7,9 @@ from email.utils import parsedate_to_datetime
 from .api import ApiError
 
 
+NATIVE_PROVIDER_ID = "local"
+
+
 class DeviceAuthCancelled(ApiError):
     def __init__(self):
         super().__init__(0, "Code sign-in was canceled.", "device_login_canceled")
@@ -39,7 +42,7 @@ class AuthController:
         self.wall_clock = wall_clock or time.time
 
     def available_methods(self):
-        """Advertised support; old servers may offer password login only."""
+        """Offer native Silo credentials only when that provider is advertised."""
         methods = []
         try:
             capability = self.client.device_capability()
@@ -49,7 +52,15 @@ class AuthController:
             if exc.status not in (404, 405, 501):
                 raise
         providers = self.client.auth_providers()
-        if providers.get("password_login"):
+        items = providers.get("items") or []
+        if not isinstance(items, list):
+            items = []
+        native_credentials = any(isinstance(provider, dict)
+                                 and provider.get("id") == NATIVE_PROVIDER_ID
+                                 and provider.get("mode") == "credentials" for provider in items)
+        # password_login covers every credentials provider, including integrations.
+        # A true flag alone must never route these credentials through another one.
+        if providers.get("password_login") and native_credentials:
             methods.append("password")
         return methods
 

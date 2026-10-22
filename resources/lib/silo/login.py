@@ -18,7 +18,7 @@ class LoginValidationError(ValueError):
         self.field = field
 
 
-def login_submission(action, server_url, username="", password="", allow_code=True):
+def login_submission(action, server_url, username="", password="", allow_code=True, allow_password=True):
     """Validate a submission without networking, logging or saving credentials."""
     try:
         server_url = normalize_server_url(str(server_url or "").strip())
@@ -27,21 +27,25 @@ def login_submission(action, server_url, username="", password="", allow_code=Tr
             "server_url", "Enter your Silo server's full http:// or https:// address."
         ) from error
     username = str(username or "").strip()
+    if action == "discover":
+        return {"action": "discover", "server_url": server_url, "username": username}
     if action == "code":
         if not allow_code:
             raise LoginValidationError("action", "Code sign-in is not available.")
         return {"action": "code", "server_url": server_url, "username": username}
     if action != "password":
         raise LoginValidationError("action", "Choose a sign-in method.")
+    if not allow_password:
+        raise LoginValidationError("action", "Silo account sign-in is unavailable on this server.")
     if not username:
-        raise LoginValidationError("username", "Enter your Silo username.")
+        raise LoginValidationError("username", "Enter your Silo account username.")
     if not isinstance(password, str) or not password:
-        raise LoginValidationError("password", "Enter your Silo password.")
+        raise LoginValidationError("password", "Enter your Silo account password.")
     return {"action": "password", "server_url": server_url,
             "username": username, "password": password}
 
 
-def prompt_login(addon, server_url="", username="", allow_code=True, message=""):
+def prompt_login(addon, server_url="", username="", allow_code=True, allow_password=True, message=""):
     """Show server, username and masked password together; return data or None.
 
     Passwords only leave this function in a confirmed password submission.
@@ -60,19 +64,22 @@ def prompt_login(addon, server_url="", username="", allow_code=True, message="")
                 return
             self.initialized = True
             self.setProperty("silo.allow_code", "true" if allow_code else "")
+            self.setProperty("silo.allow_password", "true" if allow_password else "")
+            self.setProperty("silo.sign_in_label", "Sign in" if allow_password else "Check server")
             self.setProperty("silo.login_message", str(message or ""))
             server = self.getControl(SERVER_CONTROL)
             user = self.getControl(USERNAME_CONTROL)
             password = self.getControl(PASSWORD_CONTROL)
             server.setType(xbmcgui.INPUT_TYPE_TEXT, "Silo server address")
-            user.setType(xbmcgui.INPUT_TYPE_TEXT, "Silo username")
+            user.setType(xbmcgui.INPUT_TYPE_TEXT, "Silo account username")
             # INPUT_TYPE_PASSWORD masks input and returns the original string.
             # INPUT_TYPE_PASSWORD_MD5 would hash it and break server sign-in.
-            password.setType(xbmcgui.INPUT_TYPE_PASSWORD, "Silo password")
+            password.setType(xbmcgui.INPUT_TYPE_PASSWORD, "Silo account password")
             server.setText(str(server_url or ""))
             user.setText(str(username or ""))
             password.setText("")
-            self.setFocusId(SERVER_CONTROL if not server_url else
+            self.setFocusId(SERVER_CONTROL if not server_url or not allow_password and not allow_code else
+                            CODE_CONTROL if not allow_password else
                             USERNAME_CONTROL if not username else PASSWORD_CONTROL)
 
         def onAction(self, action):
@@ -83,13 +90,13 @@ def prompt_login(addon, server_url="", username="", allow_code=True, message="")
             if control_id == CANCEL_CONTROL:
                 self.cancel()
             elif control_id in (SIGN_IN_CONTROL, CODE_CONTROL):
-                action = "password" if control_id == SIGN_IN_CONTROL else "code"
+                action = "code" if control_id == CODE_CONTROL else "password" if allow_password else "discover"
                 try:
                     self.result = login_submission(
                         action, self.getControl(SERVER_CONTROL).getText(),
                         self.getControl(USERNAME_CONTROL).getText(),
                         self.getControl(PASSWORD_CONTROL).getText() if action == "password" else "",
-                        allow_code=allow_code,
+                        allow_code=allow_code, allow_password=allow_password,
                     )
                 except LoginValidationError as error:
                     self.setProperty("silo.login_message", str(error))

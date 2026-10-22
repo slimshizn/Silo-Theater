@@ -198,14 +198,15 @@ class DetailsWindow(xbmcgui.WindowXML):
             file_id = self.application.play(self.item, resume=resume,
                                             file_id=self.selected_file_id if self.file_confirmed else None)
             if file_id is not None:
-                self.refresh(file_id)
+                self.refresh(file_id, after_playback=True)
         elif control_id == 500:
             position = self.getControl(500).getSelectedPosition()
             if 0 <= position < len(self.children):
                 self.application.open_item(self.children[position])
 
-    def refresh(self, file_id):
-        item = self.application.refresh_item(self.item, file_id)
+    def refresh(self, file_id, after_playback=False):
+        item = (self.application.item_after_playback(self.item, file_id) if after_playback
+                else self.application.refresh_item(self.item, file_id))
         self.item = item
         self.selected_file_id = file_id
         self.file_confirmed = any(version["file_id"] == file_id for version in available_versions(item))

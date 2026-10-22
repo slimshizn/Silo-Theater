@@ -1,5 +1,7 @@
 """Kodi application flow; networking and state live in the portable client."""
 
+from copy import deepcopy
+import math
 import os
 import time
 from urllib.parse import urlsplit
@@ -10,7 +12,7 @@ import xbmcgui
 import xbmcvfs
 
 from .api import ApiError, SiloClient
-from .auth import AuthController, DeviceAuthCancelled, DeviceAuthExpired
+from .auth import AuthController, DeviceAuthCancelled, DeviceAuthExpired, NATIVE_PROVIDER_ID
 from .media import available_versions, default_version, format_time, is_multipart, resume_position, version_label, version_name
 from .playback import PlaybackController
 from .settings import read_options
@@ -68,6 +70,7 @@ class Application:
         server_url = self.client.server_url
         if not self.choose_profile():
             return
+        self._recover_playback()
 
         while not self.monitor.abortRequested():
             window = HomeWindow("SiloHome.xml", self.addon.getAddonInfo("path"),
@@ -79,6 +82,7 @@ class Application:
             if action == "profile":
                 if not self.choose_profile(force=True):
                     return
+                self._recover_playback()
             elif action == "settings":
                 self.addon.openSettings()
                 if self.addon.getSetting("server_url").strip() != server_url:
@@ -93,8 +97,14 @@ class Application:
                 if not self.sign_in() or not self.choose_profile():
                     return
                 server_url = self.client.server_url
+                self._recover_playback()
             else:
                 return
+
+    def _recover_playback(self):
+        from .recovery import start_recovery
+
+        self.recovery_worker = start_recovery(self.client)
 
     def _connect(self, server_url):
         self.client = SiloClient(server_url, self.store)
@@ -131,7 +141,7 @@ class Application:
                 self.dialog.ok("Silo sign-in", message)
                 retry_methods = [method] + [value for value in methods if value != method]
                 choices = ["Try code sign-in again" if value == "device"
-                           else "Use username and password" for value in retry_methods] + ["Cancel"]
+                           else "Use your Silo account" for value in retry_methods] + ["Cancel"]
                 selected = self.dialog.select("Sign in to Silo", choices)
                 if selected < 0 or selected == len(choices) - 1:
                     return False
@@ -146,7 +156,8 @@ class Application:
         known_server = self.client.server_url if self.client is not None and methods is not None else None
         while not self.monitor.abortRequested():
             credentials = prompt_login(self.addon, server_url=server_url, username=username,
-                                       allow_code=methods is None or "device" in methods, message=message)
+                                       allow_code=methods is None or "device" in methods,
+                                       allow_password=methods is None or "password" in methods, message=message)
             if credentials is None:
                 return False
             server_url = credentials["server_url"]
@@ -157,29 +168,41 @@ class Application:
                     self._connect(server_url)
                 server_url = self.client.server_url
                 auth = AuthController(self.client)
-                if known_server != server_url:
+                if known_server != server_url or credentials["action"] == "discover":
                     methods = auth.available_methods()
                     known_server = server_url
+                if credentials["action"] == "discover":
+                    message = "" if "password" in methods else "Silo account sign-in is unavailable on this server."
+                    if "password" not in methods and "device" in methods:
+                        message += " Use a sign-in code."
+                    continue
                 if credentials["action"] == "code":
                     if "device" not in methods:
-                        message = "This server does not offer code sign-in. Use your username and password."
+                        message = "Code sign-in is unavailable on this server."
+                        if "password" in methods:
+                            message += " Use your Silo account."
                         continue
                     if not self.device_sign_in(auth):
-                        message = "Code sign-in was canceled. You can sign in here instead."
+                        message = "Code sign-in was canceled."
+                        if "password" in methods:
+                            message += " You can use your Silo account instead."
                         continue
                     self.addon.setSetting("sign_in_method", "code")
                 else:
                     if "password" not in methods:
-                        message = "This server requires code sign-in. Choose Sign in with a code."
+                        message = "Silo account sign-in is unavailable on this server."
+                        message += " Use a sign-in code." if "device" in methods else " Check the server address or contact its administrator."
                         continue
-                    self.client.login(username, password)
+                    self.client.login(username, password, provider=NATIVE_PROVIDER_ID)
                     self.store.update({"auth_method": "password", "login_username": username,
                                        "login_username_server": server_url})
                     self.addon.setSetting("sign_in_method", "password")
                 self.addon.setSetting("server_url", server_url)
                 return True
             except DeviceAuthCancelled:
-                message = "Code sign-in was canceled. You can sign in here instead."
+                message = "Code sign-in was canceled."
+                if "password" in (methods or []):
+                    message += " You can use your Silo account instead."
             except (ApiError, ValueError) as exc:
                 message = exc.message if isinstance(exc, ApiError) else str(exc)
             finally:
@@ -384,6 +407,33 @@ class Application:
         params = {"file_id": file_id} if file_id is not None else {}
         return self.client.item(item["content_id"], **params)
 
+    def _playback_item_key(self, item, file_id):
+        return (self.client.server_url, self.store.get("profile_id"), item.get("content_id"), file_id)
+
+    def item_after_playback(self, item, file_id):
+        """Update the details screen immediately, without a post-stop HTTP call."""
+        cached = getattr(self, "_after_playback_item", None)
+        if cached and cached[0] == self._playback_item_key(item, file_id):
+            return deepcopy(cached[1])
+        # Missing controller results and stale caches must never trigger networking.
+        return deepcopy(item)
+
+    def _cache_playback_item(self, item, file_id, result):
+        detail = deepcopy(item)
+        detail["file_id"] = file_id
+        version = default_version(item, preferred_file_id=file_id)
+        if isinstance(result, dict) and result.get("has_sample") is True and not is_multipart(version):
+            position = result.get("position_seconds")
+            if (isinstance(position, (int, float)) and not isinstance(position, bool)
+                    and math.isfinite(position) and position >= 0):
+                progress = dict(detail.get("user_data") or {})
+                progress.update(position_seconds=position, last_file_id=file_id,
+                                is_in_progress=position > 0 and result.get("ended") is not True)
+                if result.get("ended") is True:
+                    progress["played"] = True
+                detail["user_data"] = progress
+        self._after_playback_item = (self._playback_item_key(item, file_id), detail)
+
     def play(self, item, resume=None, file_id=None):
         """Generic Play follows preferences; explicit Resume/Start keeps its intent.
 
@@ -392,6 +442,7 @@ class Application:
         """
         if not self.is_playable(item):
             return None
+        self._after_playback_item = None
         options = self.options()
         version = default_version(item, options["file_selection"], file_id)
         if not version:
@@ -425,8 +476,11 @@ class Application:
             else:
                 resume = behavior == "resume"
         start_position = None if resume and multipart else position if resume else 0.0
-        PlaybackController(self.client, self.addon).play(
-            selected_item, start_position=start_position, file_id=file_id, options=options)
+        controller = PlaybackController(self.client, self.addon)
+        try:
+            controller.play(selected_item, start_position=start_position, file_id=file_id, options=options)
+        finally:
+            self._cache_playback_item(selected_item, file_id, getattr(controller, "last_result", None))
         return file_id
 
     @staticmethod

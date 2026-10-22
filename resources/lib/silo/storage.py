@@ -80,6 +80,21 @@ class SessionStore:
             self._write(updated)
             self._data = updated
 
+    def mutate(self, key, transform, default=None):
+        """Atomically replace one value after transforming a private copy.
+
+        A failed transform or write leaves the stored value unchanged. The
+        transform must remain local: never perform networking while it runs.
+        """
+        with self._lock:
+            value = transform(copy.deepcopy(self._data.get(key, default)))
+            updated = copy.deepcopy(self._data)
+            updated[key] = copy.deepcopy(value)
+            if updated != self._data:
+                self._write(updated)
+                self._data = updated
+            return copy.deepcopy(value)
+
     def delete(self, key):
         with self._lock:
             updated = copy.deepcopy(self._data)

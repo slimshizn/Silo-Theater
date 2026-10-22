@@ -7,10 +7,12 @@ An injected transport is callable (or has a request method) with
 The default transport uses urllib, TLS verification, a timeout and no redirects.
 """
 
+import copy
 import json
 import math
 import threading
 import time
+import uuid
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -57,10 +59,13 @@ class UrllibTransport:
             response = exc
         except (URLError, OSError, TimeoutError) as exc:
             raise ApiError(0, "Could not connect to the Silo server.", "connection_failed") from exc
-        with response:
-            data = response.read(16 * 1024 * 1024 + 1)
-            status = response.code
-            response_headers = dict(response.headers)
+        try:
+            with response:
+                data = response.read(16 * 1024 * 1024 + 1)
+                status = response.code
+                response_headers = dict(response.headers)
+        except (OSError, TimeoutError) as exc:
+            raise ApiError(0, "The Silo server response was interrupted.", "connection_failed") from exc
         if len(data) > 16 * 1024 * 1024:
             raise ApiError(status, "The server response is too large.", "invalid_response")
         if not data:
@@ -77,21 +82,33 @@ class UrllibTransport:
 class SiloClient:
     AUTH_KEYS = ("access_token", "refresh_token", "expires_at", "user",
                  "profile_id", "profile_token", "profile_token_expires_at",
-                 "temporary_session", "bound_profile_id", "session_expires_at")
+                 "temporary_session", "bound_profile_id", "session_expires_at", "auth_session_id")
 
     def __init__(self, server_url, store, transport=None, clock=None):
         self.server_url = normalize_server_url(server_url)
         self.store = store
         self.transport = transport or UrllibTransport()
         self._clock = clock or time.time
-        self._lock = threading.RLock()
+        # Keep auth rotation shared across new clients for the same store,
+        # without holding the storage/read lock during an HTTP refresh.
+        guard = getattr(store, "_lock", None) or threading.RLock()
+        with guard:
+            self._lock = getattr(store, "_silo_auth_lock", None)
+            if self._lock is None:
+                self._lock = threading.RLock()
+                try:
+                    store._silo_auth_lock = self._lock
+                except AttributeError:
+                    pass  # Plain dict test stores still share their clone lock.
+        self._reporting_scope = None
         previous = self.store.get("server_url")
         if previous != self.server_url:
             self.clear_credentials()
             self._update({"server_url": self.server_url})
 
     def _update(self, values):
-        self.store.update(values)
+        with self._lock:
+            self.store.update(values)
 
     def _delete(self, key):
         if hasattr(self.store, "delete"):
@@ -102,6 +119,30 @@ class SiloClient:
     def clear_credentials(self):
         # Preserve the chosen sign-in method for a future forced login.
         self._update({key: None for key in self.AUTH_KEYS})
+
+    def reporting_client(self, timeout=1.5):
+        """A short-timeout client bound to this exact sign-in/profile context.
+
+        The clone shares the token-rotation lock and store. Refreshes in the same
+        login remain valid, while late playback reports cannot use credentials
+        from a new login, selected profile, PIN proof, or configured server.
+        """
+        with self._lock:
+            if not self.store.get("auth_session_id"):
+                self._update({"auth_session_id": str(uuid.uuid4())})
+            clone = copy.copy(self)
+            if isinstance(self.transport, UrllibTransport):
+                clone.transport = UrllibTransport(timeout=timeout)
+            clone._reporting_scope = self._scope()
+            return clone
+
+    def _scope(self):
+        with self._lock:
+            return tuple(self.store.get(key) for key in ("server_url", "auth_session_id", "profile_id", "profile_token"))
+
+    def _check_scope(self):
+        if self._reporting_scope is not None and self._scope() != self._reporting_scope:
+            raise ApiError(403, "The playback sign-in or selected profile changed.", "playback_scope_changed")
 
     def _url(self, path, params=None):
         if not isinstance(path, str) or not path.startswith("/") or path.startswith("//"):
@@ -154,13 +195,16 @@ class SiloClient:
         PIN verification opts out of the 401 replay as well as profile headers.
         This method does not open prompts or turn 403 responses into PIN retries.
         """
+        self._check_scope()
         method = method.upper()
         url = self._url(path, params)
         headers = self.headers(authenticated, profile)
+        self._check_scope()
         if body is not None:
             headers["Content-Type"] = "application/json"
         send = getattr(self.transport, "request", self.transport)
         status, response_headers, data = send(method, url, headers, body)
+        self._check_scope()
         if status == 401 and authenticated and retry_auth and self.store.get("refresh_token"):
             # Serialize rotations. A concurrent caller may have already refreshed.
             with self._lock:
@@ -187,7 +231,8 @@ class SiloClient:
             values["user"] = tokens["user"]
         if reset_profile:
             values.update(profile_id=None, profile_token=None, profile_token_expires_at=None,
-                          temporary_session=False, bound_profile_id=None, session_expires_at=None)
+                          temporary_session=False, bound_profile_id=None, session_expires_at=None,
+                          auth_session_id=str(uuid.uuid4()))
         if session:
             values.update(session)
         if method:
@@ -236,6 +281,7 @@ class SiloClient:
 
     def refresh(self):
         with self._lock:
+            scope_before = self._scope()
             token = self.store.get("refresh_token")
             if not token:
                 raise ApiError(401, "Sign in to Silo again.", "authentication_required")
@@ -243,9 +289,11 @@ class SiloClient:
                 result = self.request("POST", "/auth/refresh", {"refresh_token": token},
                                       authenticated=False, profile=False)
             except ApiError as exc:
-                if exc.status in (401, 403):
+                if exc.status in (401, 403) and self._scope() == scope_before:
                     self.clear_credentials()
                 raise
+            if self._scope() != scope_before:
+                raise ApiError(403, "The playback sign-in or selected profile changed.", "playback_scope_changed")
             self._save_tokens(result)
             return result
 

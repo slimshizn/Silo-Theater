@@ -132,6 +132,61 @@ class ClientTests(unittest.TestCase):
             self.client(transport, store).refresh()
         self.assertEqual(store["refresh_token"], "old-refresh")
 
+    def test_reporting_clone_has_short_transport_and_preserves_rotation_lock(self):
+        client = self.client(UrllibTransport())
+        clone = client.reporting_client(timeout=1.5)
+        self.assertIs(clone.store, client.store)
+        self.assertIs(clone._lock, client._lock)
+        self.assertIsNot(clone.transport, client.transport)
+        self.assertEqual(clone.transport.timeout, 1.5)
+        self.assertEqual(client.transport.timeout, 20)
+
+    def test_late_reporting_rejects_new_login_profile_proof_or_server_before_http(self):
+        for changed in ({"auth_session_id": "new-login"}, {"profile_id": "p2"},
+                        {"profile_token": "new-proof"}, {"server_url": "https://other.example"}):
+            with self.subTest(changed=changed):
+                transport = Transport()
+                store = credentials()
+                clone = self.client(transport, store).reporting_client()
+                store.update(changed)
+                with self.assertRaises(ApiError) as error:
+                    clone.request("DELETE", "/playback/session", {})
+                self.assertEqual(error.exception.code, "playback_scope_changed")
+                self.assertEqual(transport.calls, [])
+
+    def test_old_refresh_response_cannot_overwrite_new_login_credentials(self):
+        store = credentials(auth_session_id="old-login")
+
+        def changed_during_refresh(method, url, headers, body):
+            store.update(auth_session_id="new-login", access_token="new-login-access", refresh_token="new-login-refresh")
+            return response(tokens("stale-access", "stale-refresh"))
+
+        clone = self.client(changed_during_refresh, store).reporting_client()
+        with self.assertRaises(ApiError) as error:
+            clone.refresh()
+        self.assertEqual(error.exception.code, "playback_scope_changed")
+        self.assertEqual(store["access_token"], "new-login-access")
+        self.assertEqual(store["refresh_token"], "new-login-refresh")
+
+    def test_old_refresh_rejection_cannot_clear_new_login_credentials(self):
+        store = credentials(auth_session_id="old-login")
+
+        def changed_during_refresh(method, url, headers, body):
+            store.update(auth_session_id="new-login", access_token="new-login-access", refresh_token="new-login-refresh")
+            return response({"detail": "Old session revoked"}, 401)
+
+        clone = self.client(changed_during_refresh, store).reporting_client()
+        with self.assertRaises(ApiError):
+            clone.refresh()
+        self.assertEqual(store["access_token"], "new-login-access")
+
+    def test_clients_for_the_same_session_store_share_auth_lock_but_not_storage_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SessionStore(os.path.join(directory, "session.json"))
+            first, second = SiloClient(BASE, store), SiloClient(BASE, store)
+            self.assertIs(first._lock, second._lock)
+            self.assertIsNot(first._lock, store._lock)
+
     def test_verify_pin_has_no_profile_headers_and_never_replays(self):
         transport = Transport(response({"type": "https://x/pin_refused", "detail": "Wrong PIN"}, 403))
         with self.assertRaises(ApiError) as error:
@@ -337,6 +392,18 @@ class TransportTests(unittest.TestCase):
                 transport.request("GET", "https://silo.example/api/v2/catalog", {}, None)
         self.assertEqual(error.exception.status, 0)
         self.assertNotIn("private-host", str(error.exception))
+
+    def test_response_read_timeout_is_wrapped_without_exposing_url(self):
+        transport = UrllibTransport()
+        response_object = type("Response", (), {"__enter__": lambda self: self,
+                                                "__exit__": lambda *args: None,
+                                                "read": lambda *args: (_ for _ in ()).throw(TimeoutError("https://secret.example"))})()
+        with patch.object(transport.opener, "open", return_value=response_object):
+            with self.assertRaises(ApiError) as error:
+                transport.request("GET", "https://silo.example/api/v2/catalog", {}, None)
+        self.assertEqual(error.exception.status, 0)
+        self.assertEqual(error.exception.code, "connection_failed")
+        self.assertNotIn("secret.example", str(error.exception))
 
 
 if __name__ == "__main__":
