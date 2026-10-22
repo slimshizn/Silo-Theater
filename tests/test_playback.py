@@ -431,6 +431,21 @@ class PlaybackSessionTests(unittest.TestCase):
         assert_contract(self, body, "PlaybackStartBody")
 
 
+    def test_chosen_subtitle_is_requested_by_playback_index(self):
+        client = FakeClient()
+        PlaybackSession(client, options={"subtitle_track_index": 2}).start("file-a")
+        body = client.calls[-1][2]
+        self.assertEqual(body["subtitle_track_index"], 2)
+        assert_contract(self, body, "PlaybackStartBody")
+
+    def test_no_choice_or_subtitles_setting_off_requests_no_subtitle(self):
+        for options in ({}, {"subtitle_track_index": None}, {"subtitle_track_index": -1},
+                        {"subtitle_track_index": True}, {"subtitle_track_index": 2, "subtitle_mode": "off"}):
+            with self.subTest(options=options):
+                client = FakeClient()
+                PlaybackSession(client, options=options).start("file-a")
+                self.assertNotIn("subtitle_track_index", client.calls[-1][2])
+
     def test_capability_terminals_name_the_display_setting_to_change(self):
         for reason in sorted(CAPABILITY_TERMINALS):
             with self.subTest(reason=reason):
@@ -483,6 +498,7 @@ class ControllerTests(unittest.TestCase):
                                 in_callback=False, logs=[], native_times=0,
                                 subtitle_streams=getattr(self, "subtitle_streams", []), subtitle_selected=[],
                                 audio_streams=getattr(self, "audio_streams", []), audio_selected=[],
+                                listitem_props={},
                                 profile_dir=getattr(self, "profile_dir", None) or tempfile.mkdtemp())
         pending = list(events)
         polling_thread = threading.get_ident()
@@ -571,8 +587,8 @@ class ControllerTests(unittest.TestCase):
             def getVideoInfoTag(self):
                 return SimpleNamespace(setTitle=lambda value: None, setPlot=lambda value: None)
 
-            def setProperty(self, *args):
-                pass
+            def setProperty(self, key, value):
+                state.listitem_props[key] = value
 
             def setMimeType(self, *args):
                 pass
@@ -827,6 +843,11 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(state.seeks, [8.0])
         self.assertTrue(any("stall_recovery_seek" in line for line in state.logs))
         self.assertEqual(client.calls[-1][0], "DELETE")
+
+    def test_kodi_is_told_not_to_scan_the_stream_folder_for_subtitles(self):
+        state = self.run_player(FakeClient(), [(1, None), (2, "stop")], start=0)
+        self.assertEqual(state.listitem_props.get("no-ext-subs-scan"), "true")
+        self.assertEqual(state.listitem_props.get("IsPlayable"), "true")
 
     def test_paused_playback_is_never_nudged(self):
         events = [(1, None), (2, None), (2, "pause")] + [(2, None)] * 40 + [(2, "resume"), (3, "stop")]

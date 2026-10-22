@@ -432,6 +432,17 @@ class Application:
         selected = self.dialog.select("Choose file", entries, preselect=preselect, useDetails=True)
         return versions[selected]["file_id"] if 0 <= selected < len(versions) else None
 
+    def choose_subtitle(self, choices, current=None):
+        """Pick a subtitle before playback: a playback index, None for Off,
+        or False when the dialog is cancelled (keep the current choice)."""
+        labels = ["Off"] + [label for _, label in choices]
+        indexes = [None] + [index for index, _ in choices]
+        preselect = indexes.index(current) if current in indexes else 0
+        selected = self.dialog.select("Subtitles", labels, preselect=preselect)
+        if not isinstance(selected, int) or not 0 <= selected < len(indexes):
+            return False
+        return indexes[selected]
+
     def refresh_item(self, item, file_id=None):
         params = {"file_id": file_id} if file_id is not None else {}
         return self.client.item(item["content_id"], **params)
@@ -463,16 +474,19 @@ class Application:
                 detail["user_data"] = progress
         self._after_playback_item = (self._playback_item_key(item, file_id), detail)
 
-    def play(self, item, resume=None, file_id=None):
+    def play(self, item, resume=None, file_id=None, subtitle_index=None):
         """Generic Play follows preferences; explicit Resume/Start keeps its intent.
 
         Return the chosen file so the detail screen can retain it after refresh.
         Resume positions are source seconds, exactly as the catalog reports them.
+        ``subtitle_index`` is a playback subtitle ordinal; None plays without.
         """
         if not self.is_playable(item):
             return None
         self._after_playback_item = None
         options = self.options()
+        if isinstance(subtitle_index, int) and not isinstance(subtitle_index, bool) and subtitle_index >= 0:
+            options = dict(options, subtitle_track_index=subtitle_index)
         version = default_version(item, options["file_selection"], file_id)
         if not version:
             self.dialog.ok("Silo", "No media files are available for this title.")

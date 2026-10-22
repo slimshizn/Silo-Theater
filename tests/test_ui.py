@@ -212,6 +212,27 @@ class ApplicationFlowTests(unittest.TestCase):
         player.assert_not_called()
         self.app.client.item.assert_not_called()
 
+    def test_choose_subtitle_offers_off_first_and_keeps_choice_on_cancel(self):
+        choices = [(0, "ENG (External file)"), (1, "ENG · Full"), (2, "FRE")]
+        self.app.dialog.select.return_value = 2
+        self.assertEqual(self.app.choose_subtitle(choices, current=None), 1)
+        labels = self.app.dialog.select.call_args.args[1]
+        self.assertEqual(labels[0], "Off")
+        self.assertEqual(self.app.dialog.select.call_args.kwargs["preselect"], 0)
+        self.app.dialog.select.return_value = 0
+        self.assertIsNone(self.app.choose_subtitle(choices, current=1))
+        self.assertEqual(self.app.dialog.select.call_args.kwargs["preselect"], 2)
+        self.app.dialog.select.return_value = -1
+        self.assertIs(self.app.choose_subtitle(choices, current=1), False)
+
+    def test_chosen_subtitle_reaches_playback_options(self):
+        self.app.client.item.return_value = movie_item()
+        with patch.object(application_module, "PlaybackController") as player:
+            self.app.play(movie_item(), resume=False, file_id="file-a", subtitle_index=3)
+            self.assertEqual(player.return_value.play.call_args.kwargs["options"]["subtitle_track_index"], 3)
+            self.app.play(movie_item(), resume=False, file_id="file-a")
+            self.assertNotIn("subtitle_track_index", player.return_value.play.call_args.kwargs["options"])
+
     def test_explicit_selected_file_skips_repeat_prompt(self):
         self.app.client.item.return_value = movie_item(multiple=True)
         with patch.object(application_module, "PlaybackController") as player:
@@ -407,7 +428,7 @@ class WindowTests(unittest.TestCase):
         self.app.play.return_value = "file-a"
         self.app.item_after_playback.return_value = updated
         window.onClick(100)
-        self.app.play.assert_called_once_with(original, resume=None, file_id=None)
+        self.app.play.assert_called_once_with(original, resume=None, file_id=None, subtitle_index=None)
         self.assertEqual(window.properties["silo.resume_label"], "Resume from 1:15")
         self.assertIs(window.item, updated)
         self.app.refresh_item.assert_not_called()
@@ -426,7 +447,7 @@ class WindowTests(unittest.TestCase):
         self.assertIn("1080p", window.properties["silo.file_label"])
         self.app.play.return_value = "file-b"
         window.onClick(101)
-        self.app.play.assert_called_once_with(refreshed, resume=True, file_id="file-b")
+        self.app.play.assert_called_once_with(refreshed, resume=True, file_id="file-b", subtitle_index=None)
         self.assertEqual(window.selected_file_id, "file-b")
         self.assertTrue(window.file_confirmed)
 
@@ -454,6 +475,65 @@ class WindowTests(unittest.TestCase):
         window.onInit()
         self.assertEqual(window.focus, 100)
         self.assertEqual(window.properties["silo.resume"], "true")
+
+    def subtitled_item(self, multiple=True):
+        item = movie_item(multiple=multiple)
+        item["versions"][0]["subtitle_tracks"] = [
+            {"index": 3, "language": "eng", "title": "Full", "external": False},
+            {"index": 4, "language": "fre", "forced": True, "external": False},
+            {"index": 5, "language": "eng", "external": True, "file_name": "Example.en.srt"},
+        ]
+        return item
+
+    def test_play_uses_the_displayed_version_without_asking_again(self):
+        window = ui.DetailsWindow("SiloDetails.xml", ".")
+        window.application, window.item = self.app, movie_item(multiple=True)
+        self.app.options.return_value["file_selection"] = "ask"
+        window.onInit()
+        self.assertEqual(window.selected_file_id, "file-a")
+        self.app.play.return_value = "file-a"
+        window.onClick(100)
+        self.assertEqual(self.app.play.call_args.kwargs["file_id"], "file-a")
+        self.app.choose_file.assert_not_called()
+
+    def test_subtitle_button_lists_tracks_and_play_sends_the_choice(self):
+        window = ui.DetailsWindow("SiloDetails.xml", ".")
+        window.application, window.item = self.app, self.subtitled_item()
+        window.onInit()
+        self.assertEqual(window.properties["silo.has_subtitles"], "true")
+        self.assertEqual(window.properties["silo.subtitle_label"], "Subtitles: Off")
+        offered = None
+
+        def choose(choices, current):
+            nonlocal offered
+            offered = choices
+            return 1  # first embedded track, after the one external file
+
+        self.app.choose_subtitle.side_effect = choose
+        window.onClick(106)
+        self.assertEqual([index for index, _ in offered], [0, 1, 2])
+        self.assertIn("External file", offered[0][1])
+        self.assertEqual(window.subtitle_index, 1)
+        self.assertEqual(window.properties["silo.subtitle_label"], "Subtitles: ENG · Full")
+        self.app.play.return_value = "file-a"
+        window.onClick(100)
+        self.assertEqual(self.app.play.call_args.kwargs["subtitle_index"], 1)
+
+    def test_subtitle_cancel_keeps_choice_and_new_version_resets_it(self):
+        window = ui.DetailsWindow("SiloDetails.xml", ".")
+        item = self.subtitled_item()
+        window.application, window.item = self.app, item
+        window.onInit()
+        self.app.choose_subtitle.return_value = 2
+        window.onClick(106)
+        self.app.choose_subtitle.return_value = False
+        window.onClick(106)
+        self.assertEqual(window.subtitle_index, 2)
+        self.app.choose_file.return_value = "file-b"
+        self.app.refresh_item.return_value = item
+        window.onClick(103)
+        self.assertIsNone(window.subtitle_index)
+        self.assertEqual(window.properties["silo.has_subtitles"], "")
 
     def test_completed_progress_hides_resume_and_spoiler_setting_keeps_cast_ratings(self):
         window = ui.DetailsWindow("SiloDetails.xml", ".")

@@ -116,7 +116,7 @@ def kodi_media_url(server_url, stream):
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.2.4", options=None):
+    def __init__(self, client, mode="auto", version="0.2.5", options=None):
         self.client, self.mode, self.version = client, mode, version
         self.options = dict(options or {})
         # /api/v2 calls this installation_id, but it identifies the SERVER.
@@ -169,6 +169,11 @@ class PlaybackSession:
         }
         if start_position is not None:
             body["start_position"] = _number(start_position)
+        # Without a subtitle field Silo plans subtitles off.
+        track = self.options.get("subtitle_track_index")
+        if (isinstance(track, int) and not isinstance(track, bool) and track >= 0
+                and self.options.get("subtitle_mode", "server") != "off"):
+            body["subtitle_track_index"] = track
         try:
             decision = self.client.request("POST", "/playback/start", body)
         except ApiError as error:
@@ -620,6 +625,9 @@ class PlaybackController:
             tag.setTitle(item.get("title", "Silo"))
             tag.setPlot(item.get("overview", ""))
             listitem.setProperty("IsPlayable", "true")
+            # Silo supplies subtitles itself; never let Kodi probe the stream's
+            # "folder" for subtitle files (Kodi does this for LAN servers).
+            listitem.setProperty("no-ext-subs-scan", "true")
             if plan["stream"].get("mime_type"):
                 listitem.setMimeType(plan["stream"]["mime_type"])
             listitem.setContentLookup(False)

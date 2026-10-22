@@ -4,8 +4,29 @@ import unittest
 
 from resources.lib.silo.media import (
     available_versions, default_version, format_time, is_multipart,
-    resume_position, version_label, version_name,
+    resume_position, subtitle_choices, version_label, version_name,
 )
+
+
+class SubtitleChoiceTests(unittest.TestCase):
+    def test_external_files_come_first_then_embedded_in_catalog_order(self):
+        version = {"subtitle_tracks": [
+            {"index": 2, "language": "eng", "title": "Full", "external": False},
+            {"index": 3, "language": "spa", "hearing_impaired": True, "external": False},
+            {"index": 4, "language": "eng", "external": True, "forced": True},
+            {"index": 5, "language": "fre", "external": True},
+        ]}
+        self.assertEqual(subtitle_choices(version), [
+            (0, "ENG (Forced, External file)"),
+            (1, "FRE (External file)"),
+            (2, "ENG · Full"),
+            (3, "SPA (SDH)"),
+        ])
+
+    def test_missing_or_malformed_tracks_give_no_choices(self):
+        for version in (None, {}, {"subtitle_tracks": None}, {"subtitle_tracks": ["x", 3]}):
+            with self.subTest(version=version):
+                self.assertEqual(subtitle_choices(version), [])
 
 
 class CatalogPresentationTests(unittest.TestCase):

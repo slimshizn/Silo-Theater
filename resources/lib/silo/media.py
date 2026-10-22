@@ -77,6 +77,33 @@ def version_label(version):
     return " · ".join(parts) or version_name(version)
 
 
+def subtitle_choices(version):
+    """Return ``(playback_index, label)`` for each subtitle of a file version.
+
+    The catalog's ``subtitle_tracks[].index`` is a stream number, not the
+    playback ordinal. Playback numbers external files first (0..E-1, catalog
+    order), then embedded tracks (E.., catalog order), so that is the index a
+    start request names. An unknown index makes Silo play without subtitles.
+    """
+    tracks = [track for track in (version or {}).get("subtitle_tracks") or [] if isinstance(track, dict)]
+    external = [track for track in tracks if track.get("external")]
+    embedded = [track for track in tracks if not track.get("external")]
+    numbered = list(enumerate(external)) + [(len(external) + i, track) for i, track in enumerate(embedded)]
+    choices = []
+    for index, track in numbered:
+        label = str(track.get("language") or "Unknown").upper()
+        title = track.get("title") or track.get("embedded_title")
+        if title:
+            label += " · " + str(title)
+        flags = [name for key, name in (("forced", "Forced"), ("hearing_impaired", "SDH")) if track.get(key)]
+        if track.get("external"):
+            flags.append("External file")
+        if flags:
+            label += " (" + ", ".join(flags) + ")"
+        choices.append((index, label))
+    return choices
+
+
 def is_multipart(version):
     if not version:
         return False

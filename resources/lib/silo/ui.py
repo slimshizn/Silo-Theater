@@ -2,7 +2,8 @@
 
 import xbmcgui
 
-from .media import available_versions, default_version, format_time, is_multipart, version_label, version_name
+from .media import (available_versions, default_version, format_time, is_multipart, subtitle_choices,
+                    version_label, version_name)
 
 
 BACK_ACTIONS = {9, 10, 92, 216, 247, 257, 61448}
@@ -119,6 +120,8 @@ class DetailsWindow(xbmcgui.WindowXML):
         self.initialized = False
         self.selected_file_id = None
         self.file_confirmed = False
+        # Playback ordinal of the chosen subtitle; None plays without subtitles.
+        self.subtitle_index = None
 
     def onInit(self):
         if self.initialized:
@@ -149,6 +152,7 @@ class DetailsWindow(xbmcgui.WindowXML):
         self.setProperty("silo.continue", "true" if self.item.get("type") in ("series", "season")
                          and self.item.get("play_content_id") else "")
         self.update_file_selection()
+        self.update_subtitle_selection()
         self.update_resume()
         self.setProperty("silo.children", "true" if self.children else "")
         self.setProperty("silo.children_label", "Seasons" if self.item.get("type") == "series" else "Episodes")
@@ -167,6 +171,18 @@ class DetailsWindow(xbmcgui.WindowXML):
             self.setProperty("silo.file_label", "File: " + label + (" — " + name if name != label else ""))
         else:
             self.setProperty("silo.file_label", "File: No media files available")
+
+    def subtitle_options(self):
+        version = default_version(self.item, preferred_file_id=self.selected_file_id)
+        return subtitle_choices(version)
+
+    def update_subtitle_selection(self):
+        choices = dict(self.subtitle_options())
+        if self.subtitle_index not in choices:
+            self.subtitle_index = None
+        self.setProperty("silo.has_subtitles", "true" if choices else "")
+        label = choices.get(self.subtitle_index, "Off")
+        self.setProperty("silo.subtitle_label", "Subtitles: " + label)
 
     def update_resume(self):
         resume = self.application.resume_seconds(self.item)
@@ -191,12 +207,19 @@ class DetailsWindow(xbmcgui.WindowXML):
             file_id = self.application.choose_file(self.item, self.selected_file_id)
             if file_id is not None:
                 self.refresh(file_id)
+        elif control_id == 106:
+            choices = self.subtitle_options()
+            chosen = self.application.choose_subtitle(choices, self.subtitle_index)
+            if chosen is not False:
+                self.subtitle_index = chosen
+                self.update_subtitle_selection()
         elif control_id == 105 and self.item.get("play_content_id"):
             self.application.open_item({"content_id": self.item["play_content_id"]})
         elif control_id in (100, 101, 104):
             resume = {100: None, 101: True, 104: False}[control_id]
-            file_id = self.application.play(self.item, resume=resume,
-                                            file_id=self.selected_file_id if self.file_confirmed else None)
+            # Play the version shown on this screen; File is how to change it.
+            file_id = self.application.play(self.item, resume=resume, file_id=self.selected_file_id,
+                                            subtitle_index=self.subtitle_index)
             if file_id is not None:
                 self.refresh(file_id, after_playback=True)
         elif control_id == 500:
@@ -207,8 +230,12 @@ class DetailsWindow(xbmcgui.WindowXML):
     def refresh(self, file_id, after_playback=False):
         item = (self.application.item_after_playback(self.item, file_id) if after_playback
                 else self.application.refresh_item(self.item, file_id))
+        if file_id != self.selected_file_id:
+            # Another version has its own subtitle tracks.
+            self.subtitle_index = None
         self.item = item
         self.selected_file_id = file_id
         self.file_confirmed = any(version["file_id"] == file_id for version in available_versions(item))
         self.update_file_selection()
+        self.update_subtitle_selection()
         self.update_resume()
