@@ -37,7 +37,8 @@ from .deeplink import ADDON_ID, DEEP_LINK_ACTIONS, deep_link, run_script_builtin
 from .settings import read_options
 from .storage import SessionStore, StorageError, session_path
 
-BASE_URL = "plugin://script.silo/"
+# The widgets add-on (plugin.video.silotheater) runs this code with Silo Theater's settings and session.
+BASE_URL = "plugin://plugin.video.silotheater/"
 CACHE_SECONDS = 60
 # A failed refresh may show an older copy; presigned art outlives this.
 STALE_SECONDS = 15 * 60
@@ -375,7 +376,7 @@ class Plugin:
                 xbmc.executebuiltin(run_script_builtin(action, content_id))
             return
         if action == "signin":
-            xbmc.executebuiltin("RunAddon({})".format(ADDON_ID))
+            xbmc.executebuiltin("RunScript({})".format(ADDON_ID))
             return
         try:
             self.client = connect(self.addon, self.client_factory)
@@ -448,11 +449,11 @@ class Plugin:
         xbmcplugin.endOfDirectory(self.handle, succeeded=True, cacheToDisc=False)
 
 
-def run(argv):
-    """Kodi plugin entry: ``argv = [base_url, handle, query]``."""
+def run(argv, addon=None):
+    """Kodi plugin entry: ``argv = [base_url, handle, query]``; ``addon`` is Silo Theater's."""
     try:
         handle = int(argv[1])
     except (IndexError, TypeError, ValueError):
         handle = -1
     params = parse_query(argv[2] if len(argv) > 2 else "")
-    Plugin(handle).dispatch(params)
+    Plugin(handle, addon=addon).dispatch(params)

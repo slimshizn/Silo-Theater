@@ -19,7 +19,7 @@ Silo Theater is a community project. It is not an official Silo app and is not m
 - Up next with a countdown, Are you still watching?, and rewind when resuming.
 - A Silo player menu during playback: info, stats, version, quality, speed, aspect, sleep timer, audio, subtitles (including online search, AI translation and sync to audio) and chapters.
 - Silo Settings for your profile and this device; switch between several Silo servers.
-- Widgets for Kodi's own home screen: your Silo rows, Watchlist and Favorites.
+- Widgets for Kodi's own home screen with the optional **Silo Theater Widgets** add-on: your Silo rows, Watchlist and Favorites.
 
 ## Install in Kodi
 
@@ -29,6 +29,8 @@ Silo Theater is a community project. It is not an official Silo app and is not m
 4. Open **Install from repository → Silo Theater Repository**, find **Silo Theater**, and select **Install**.
 
 Open **Silo Theater** in Kodi and enter your server URL and Silo account username and password on the sign-in screen. Native Silo code sign-in is also available when your server supports it. Valid sessions and your last profile are reused on later launches; locked profiles still require their PIN. Server URLs with a reverse-proxy path prefix are supported.
+
+For Silo rows on Kodi's own home screen, also install **Silo Theater Widgets** from the same repository (**Video add-ons**). Point your skin's widgets at its folders; selecting a title plays it in Silo Theater.
 
 You can also [download the repository installer](https://slimshizn.github.io/Silo-Theater/repository.silo.theater-1.0.1.zip) in a browser and transfer it to your Kodi device.
 
@@ -46,11 +48,11 @@ make build
 make repository
 ```
 
-`make build` creates `dist/script.silo-0.5.2.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
+`make build` creates `dist/script.silo-0.5.3.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
-Version **0.5.2** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** in Settings to limit converted streams.
+Version **0.5.3** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** in Settings to limit converted streams.
 
 ### During playback
 

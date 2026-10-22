@@ -131,5 +131,45 @@ class RepositoryTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
 
 
+
+class WidgetsAddonTests(unittest.TestCase):
+    """Widgets ship as their own add-on so Silo Theater is listed once in Kodi."""
+
+    def test_repository_lists_the_widgets_addon_with_its_four_files(self):
+        with tempfile.TemporaryDirectory() as folder:
+            build_repository(ROOT, Path(folder))
+            catalog = ET.parse(Path(folder) / "addons.xml").getroot()
+            ids = sorted(addon.get("id") for addon in catalog)
+            self.assertEqual(ids, ["plugin.video.silotheater", REPOSITORY_ID, "script.silo"])
+            widgets = catalog.find("addon[@id='plugin.video.silotheater']")
+            package = Path(folder) / "zips/plugin.video.silotheater/plugin.video.silotheater-{}.zip".format(
+                widgets.get("version"))
+            with zipfile.ZipFile(package) as archive:
+                self.assertEqual(sorted(archive.namelist()), [
+                    "plugin.video.silotheater/LICENSE", "plugin.video.silotheater/addon.xml",
+                    "plugin.video.silotheater/default.py", "plugin.video.silotheater/icon.png"])
+            silo = catalog.find("addon[@id='script.silo']")
+            self.assertIsNone(silo.find("extension[@point='xbmc.python.pluginsource']"))
+
+    def test_widgets_require_this_silo_theater_release(self):
+        widgets = ET.parse(ROOT / "widgets/addon.xml").getroot()
+        required = widgets.find("requires/import[@addon='script.silo']").get("version")
+        self.assertEqual(required, ET.parse(ROOT / "addon.xml").getroot().get("version"))
+
+    def test_silo_theater_cannot_become_a_plugin_again(self):
+        from scripts.build import validate_addon
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder) / "source"
+            shutil.copytree(ROOT / "resources", root / "resources")
+            for name in ("default.py", "LICENSE"):
+                shutil.copyfile(ROOT / name, root / name)
+            manifest = (ROOT / "addon.xml").read_text(encoding="utf-8").replace(
+                "</addon>", '  <extension point="xbmc.python.pluginsource" library="default.py">'
+                "<provides>video</provides></extension>\n</addon>")
+            (root / "addon.xml").write_text(manifest, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "plugin source"):
+                validate_addon(root)
+
 if __name__ == "__main__":
     unittest.main()

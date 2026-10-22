@@ -29,7 +29,7 @@ def _resolution(mode, max_resolution):
     return "2160p" if mode != "auto" else "1080p"
 
 
-def playback_capabilities(mode="auto", app_version="0.5.2", max_resolution="auto", client_audio_selection=True):
+def playback_capabilities(mode="auto", app_version="0.5.3", max_resolution="auto", client_audio_selection=True):
     """Return the v2 start body's codec capabilities and playback context.
 
     Kodi's decoder can decode these formats in software, but this build cannot

@@ -76,16 +76,25 @@ class Application:
             pass  # Sign-in reports the bad address; keep the raw value here.
         return session_path(self._profile_dir(), server_url)
 
+    def _servers_path(self):
+        """servers.json in the add-on profile, or None outside a real Kodi profile folder."""
+        folder = str(self._profile_dir())
+        return os.path.join(folder, "servers.json") if os.path.isabs(folder) else None
+
     def known_servers(self):
         from .storage import SessionStore as Store
 
-        servers = Store(os.path.join(self._profile_dir(), "servers.json")).get("servers", [])
+        path = self._servers_path()
+        servers = Store(path).get("servers", []) if path else []
         return [str(url) for url in servers if isinstance(url, str) and url]
 
     def remember_server(self, server_url, remove=False):
         from .storage import SessionStore as Store
 
-        store = Store(os.path.join(self._profile_dir(), "servers.json"))
+        path = self._servers_path()
+        if not path:
+            return
+        store = Store(path)
         servers = [url for url in store.get("servers", []) if url != server_url]
         if not remove:
             servers.insert(0, server_url)

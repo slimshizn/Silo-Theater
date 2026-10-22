@@ -102,6 +102,33 @@ def _write(path: Path, data: bytes) -> None:
             temporary_path.unlink()
 
 
+WIDGETS_ID = "plugin.video.silotheater"
+WIDGETS_FILES = ("addon.xml", "default.py", "icon.png")
+
+
+def _widgets(root: Path):
+    """The optional widgets add-on: (manifest, zip bytes), or None without widgets/."""
+    folder = root / "widgets"
+    if not folder.is_dir():
+        return None
+    manifest = ET.parse(folder / "addon.xml").getroot()
+    if manifest.get("id") != WIDGETS_ID or not manifest.get("version"):
+        raise ValueError("widgets/addon.xml must declare {} with a version".format(WIDGETS_ID))
+    compile((folder / "default.py").read_text(encoding="utf-8"), "widgets/default.py", "exec")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        sources = [(name, folder / name) for name in WIDGETS_FILES] + [("LICENSE", root / "LICENSE")]
+        for name, path in sources:
+            if path.is_symlink() or not path.is_file():
+                raise ValueError("Widgets package input is missing or a symlink: {}".format(name))
+            info = zipfile.ZipInfo(WIDGETS_ID + "/" + name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.create_system = 3
+            info.external_attr = 0o100644 << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            archive.writestr(info, path.read_bytes(), compresslevel=9)
+    return manifest, buffer.getvalue()
+
+
 def build_repository(root: Path = ROOT, output_dir: Optional[Path] = None) -> Dict[str, Path]:
     """Build the Kodi catalog, installer and versioned add-on packages.
 
@@ -123,18 +150,25 @@ def build_repository(root: Path = ROOT, output_dir: Optional[Path] = None) -> Di
     repository_zip = _repository_zip(root, repository_manifest)
     addon_name = "{id}-{version}.zip".format(**addon)
     repository_name = "{}-{}.zip".format(REPOSITORY_ID, repository_version)
+    widgets = _widgets(root)
     packages = {
         output / "zips" / addon["id"] / addon_name: addon_zip,
         output / "zips" / REPOSITORY_ID / repository_name: repository_zip,
         output / repository_name: repository_zip,
     }
-    # Validate all immutable destinations before updating any catalog or file.
+    if widgets is not None:
+        widgets_name = "{}-{}.zip".format(WIDGETS_ID, widgets[0].get("version"))
+        packages[output / "zips" / WIDGETS_ID / widgets_name] = widgets[1]
+        packages[output / "zips" / WIDGETS_ID / "icon.png"] = (root / "widgets" / "icon.png").read_bytes()
+        # Validate all immutable destinations before updating any catalog or file.
     for path, contents in packages.items():
         if path.exists() and path.read_bytes() != contents:
             raise ValueError("Package already exists with different bytes: {}. Bump the add-on version before rebuilding.".format(path.name))
 
     catalog = ET.Element("addons")
     manifests = [ET.parse(root / "addon.xml").getroot(), repository_manifest]
+    if widgets is not None:
+        manifests.append(widgets[0])
     for manifest in sorted(manifests, key=lambda value: value.get("id", "")):
         catalog.append(deepcopy(manifest))
     ET.indent(catalog, space="  ")

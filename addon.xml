@@ -1,13 +1,10 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="script.silo" name="Silo Theater" version="0.5.2" provider-name="slimshizn">
+<addon id="script.silo" name="Silo Theater" version="0.5.3" provider-name="slimshizn">
   <requires>
     <import addon="xbmc.python" version="3.0.1" />
     <import addon="xbmc.gui" version="5.17.0" />
   </requires>
   <extension point="xbmc.python.script" library="default.py">
-    <provides>video</provides>
-  </extension>
-  <extension point="xbmc.python.pluginsource" library="widgets_entry.py">
     <provides>video</provides>
   </extension>
   <extension point="xbmc.addon.metadata">

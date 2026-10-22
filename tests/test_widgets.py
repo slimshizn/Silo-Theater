@@ -205,8 +205,8 @@ class RootListingTest(WidgetTestCase):
         self.assertEqual([entry.label for _, entry, _ in items],
                          ["Continue Watching", "Recently Added", "Watchlist", "Favorites"])
         self.assertTrue(all(folder for _, _, folder in items))
-        self.assertEqual(items[1][0], "plugin://script.silo/?action=section&id=recently_added")
-        self.assertEqual(items[2][0], "plugin://script.silo/?action=watchlist")
+        self.assertEqual(items[1][0], "plugin://plugin.video.silotheater/?action=section&id=recently_added")
+        self.assertEqual(items[2][0], "plugin://plugin.video.silotheater/?action=watchlist")
         self.assertEqual(items[1][1].art["fanart"], "https://img.example.invalid/b1.jpg")
         self.assertTrue(plugin.ended)
         self.assertEqual(self.paths(), ["/api/v2/home/sections"])
@@ -229,7 +229,7 @@ class ItemListingTest(WidgetTestCase):
         self.assertIn(plugin.SORT_METHOD_VIDEO_YEAR, plugin.sorts)
         url, entry, folder = items[0]
         self.assertFalse(folder)
-        self.assertEqual(url, "plugin://script.silo/?action=play&id=movie%3Aexample-1")
+        self.assertEqual(url, "plugin://plugin.video.silotheater/?action=play&id=movie%3Aexample-1")
         self.assertEqual(entry.properties["IsPlayable"], "false")
         self.assertEqual(entry.art["poster"], "https://img.example.invalid/p1.jpg")
         self.assertEqual(entry.art["fanart"], "https://img.example.invalid/b1.jpg")
@@ -303,7 +303,7 @@ class SignedOutTest(WidgetTestCase):
         self.assertEqual(len(items), 1)
         url, entry, folder = items[0]
         self.assertEqual(entry.label, "Open Silo Theater to sign in")
-        self.assertEqual(url, "plugin://script.silo/?action=signin")
+        self.assertEqual(url, "plugin://plugin.video.silotheater/?action=signin")
         self.assertFalse(folder)
         self.assertTrue(plugin.ended)
 
@@ -328,7 +328,7 @@ class SignedOutTest(WidgetTestCase):
 
     def test_sign_in_item_runs_the_addon(self):
         self.run_plugin("?action=signin")
-        kodi.executebuiltin.assert_called_once_with("RunAddon(script.silo)")
+        kodi.executebuiltin.assert_called_once_with("RunScript(script.silo)")
 
     def test_network_failure_ends_directory_unsuccessfully(self):
         self.sign_in()
@@ -367,8 +367,8 @@ class DeepLinkTest(WidgetTestCase):
 
     def test_run_uses_kodi_plugin_argv(self):
         with patch.object(widgets, "Plugin") as factory:
-            widgets.run(["plugin://script.silo/", "12", "?action=section&id=recently_added"])
-        factory.assert_called_once_with(12)
+            widgets.run(["plugin://plugin.video.silotheater/", "12", "?action=section&id=recently_added"])
+        factory.assert_called_once_with(12, addon=None)
         factory.return_value.dispatch.assert_called_once_with({"action": "section", "id": "recently_added"})
 
 
@@ -439,7 +439,7 @@ class NoTokensTest(WidgetTestCase):
                              repr(entry.tag.calls)])
             for secret in (ACCESS, REFRESH, PROFILE_TOKEN):
                 self.assertNotIn(secret, text)
-            self.assertTrue(url.startswith("plugin://script.silo/?action="))
+            self.assertTrue(url.startswith("plugin://plugin.video.silotheater/?action="))
             self.assertEqual(set(dict(parse_qsl(urlsplit(url).query))) - {"action", "id"}, set())
 
 

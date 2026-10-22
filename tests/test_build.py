@@ -22,7 +22,7 @@ class BuildTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name) / "source"
         self.root.mkdir()
-        for name in ("addon.xml", "LICENSE", "widgets_entry.py"):
+        for name in ("addon.xml", "LICENSE"):
             shutil.copyfile(ROOT / name, self.root / name)
         self.manifest = ET.parse(self.root / "addon.xml").getroot()
         self.version = self.manifest.get("version")
