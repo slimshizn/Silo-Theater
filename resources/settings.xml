@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<settings version="1">
+  <section id="script.silo">
+    <category id="connection" label="32000">
+      <group id="1">
+        <setting id="server_url" type="string" label="32001" help="32002">
+          <level>0</level>
+          <default />
+          <constraints><allowempty>true</allowempty></constraints>
+          <control type="edit" format="string"><heading>32001</heading></control>
+        </setting>
+        <setting id="sign_in_method" type="string" label="32003">
+          <level>0</level>
+          <default>code</default>
+          <constraints>
+            <options>
+              <option label="32004">code</option>
+              <option label="32005">password</option>
+            </options>
+          </constraints>
+          <control type="spinner" format="string" />
+        </setting>
+      </group>
+    </category>
+    <category id="playback" label="32010">
+      <group id="1">
+        <setting id="dv_mode" type="string" label="32011" help="32016">
+          <level>0</level>
+          <default>auto</default>
+          <constraints>
+            <options>
+              <option label="32012">auto</option>
+              <option label="32013">hdr10</option>
+              <option label="32014">dv</option>
+              <option label="32015">p7_fel</option>
+            </options>
+          </constraints>
+          <control type="spinner" format="string" />
+        </setting>
+        <setting id="auto_next" type="boolean" label="32017">
+          <level>0</level>
+          <visible>false</visible>
+          <default>true</default>
+          <control type="toggle" />
+        </setting>
+        <setting id="progress_interval" type="integer" label="32018" help="32019">
+          <level>1</level>
+          <default>10</default>
+          <constraints><minimum>5</minimum><step>5</step><maximum>10</maximum></constraints>
+          <control type="spinner" format="integer" />
+        </setting>
+      </group>
+    </category>
+  </section>
+</settings>

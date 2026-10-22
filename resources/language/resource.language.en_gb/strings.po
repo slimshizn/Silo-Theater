@@ -1,0 +1,74 @@
+# Silo for Kodi
+# SPDX-License-Identifier: AGPL-3.0-or-later
+msgid ""
+msgstr ""
+"Project-Id-Version: script.silo 0.1.0\n"
+"Language: en_GB\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgctxt "#32000"
+msgid "Connection"
+msgstr ""
+
+msgctxt "#32001"
+msgid "Silo server URL"
+msgstr ""
+
+msgctxt "#32002"
+msgid "Enter your Silo server address, including https:// or http://."
+msgstr ""
+
+msgctxt "#32003"
+msgid "Sign-in method"
+msgstr ""
+
+msgctxt "#32004"
+msgid "Code sign-in"
+msgstr ""
+
+msgctxt "#32005"
+msgid "Username and password"
+msgstr ""
+
+msgctxt "#32010"
+msgid "Playback"
+msgstr ""
+
+msgctxt "#32011"
+msgid "HDR and Dolby Vision capability"
+msgstr ""
+
+msgctxt "#32012"
+msgid "SDR / unknown display (default)"
+msgstr ""
+
+msgctxt "#32013"
+msgid "HDR10"
+msgstr ""
+
+msgctxt "#32014"
+msgid "Dolby Vision (without full P7 FEL)"
+msgstr ""
+
+msgctxt "#32015"
+msgid "Dolby Vision P7 FEL"
+msgstr ""
+
+msgctxt "#32016"
+msgid "Enable P7 FEL only when your device and Kodi build support full enhancement-layer playback. Automatic mode does not assume FEL support."
+msgstr ""
+
+msgctxt "#32017"
+msgid "Play the next episode automatically"
+msgstr ""
+
+msgctxt "#32018"
+msgid "Progress sync interval (seconds)"
+msgstr ""
+
+msgctxt "#32019"
+msgid "How often playback progress is sent to your Silo server."
+msgstr ""

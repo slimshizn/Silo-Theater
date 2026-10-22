@@ -1,0 +1,667 @@
+{
+  "source": "https://raw.githubusercontent.com/Silo-Server/silo-server/main/contracts/api/v2/openapi.json",
+  "source_sha256": "27b004f6ddee94182d1e70d15aa669d10f4f7e22f246d2456a9bf481a73bd28c",
+  "schemas": {
+    "AudioPassthroughEntryV3": {
+      "additionalProperties": false,
+      "properties": {
+        "channel_counts": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "codec": {
+          "type": "string"
+        },
+        "layouts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "codec"
+      ],
+      "type": "object"
+    },
+    "AudioPassthroughV3": {
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/components/schemas/AudioPassthroughEntryV3"
+          },
+          "type": "array"
+        },
+        "max_channels": {
+          "type": "integer"
+        },
+        "passthrough_codecs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "spatializer_enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "passthrough_codecs",
+        "spatializer_enabled",
+        "max_channels"
+      ],
+      "type": "object"
+    },
+    "ClientCodecCapabilitiesV3": {
+      "additionalProperties": false,
+      "properties": {
+        "audio_evidence": {
+          "type": "string"
+        },
+        "audio_passthrough": {
+          "$ref": "#/components/schemas/AudioPassthroughV3"
+        },
+        "codecs_audio": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "codecs_video": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "codecs_video_hardware": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "containers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "hdr": {
+          "type": "boolean"
+        },
+        "hdr_details": {
+          "$ref": "#/components/schemas/HDRCapabilitiesV3"
+        },
+        "max_resolution": {
+          "type": "string"
+        },
+        "video_decode": {
+          "items": {
+            "$ref": "#/components/schemas/VideoDecodeCapabilityV3"
+          },
+          "type": "array"
+        },
+        "video_evidence": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "video_evidence",
+        "audio_evidence",
+        "codecs_video",
+        "codecs_video_hardware",
+        "codecs_audio",
+        "containers",
+        "hdr"
+      ],
+      "type": "object"
+    },
+    "ClientPlaybackContextV3": {
+      "additionalProperties": false,
+      "properties": {
+        "app_build": {
+          "type": "string"
+        },
+        "app_channel": {
+          "type": "string"
+        },
+        "app_version": {
+          "type": "string"
+        },
+        "deliveries": {
+          "additionalProperties": {
+            "$ref": "#/components/schemas/DeliveryCapabilityV3"
+          },
+          "type": "object"
+        },
+        "device": {
+          "$ref": "#/components/schemas/DeviceContextV3"
+        },
+        "form_factor": {
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/components/schemas/OutputContextV3"
+        },
+        "protocol_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "form_factor",
+        "app_version",
+        "device",
+        "output",
+        "deliveries"
+      ],
+      "type": "object"
+    },
+    "DeliveryCapabilityV3": {
+      "additionalProperties": false,
+      "properties": {
+        "audio_decode_codecs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "audio_passthrough_codecs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "auth_header_refresh": {
+          "type": "boolean"
+        },
+        "containers": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "failure_reason": {
+          "type": "string"
+        },
+        "features": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "hdr_details": {
+          "$ref": "#/components/schemas/HDRCapabilitiesV3"
+        },
+        "max_channels": {
+          "type": "integer"
+        },
+        "subtitles": {
+          "$ref": "#/components/schemas/DeliverySubtitleCapabilitiesV3"
+        },
+        "supported_on_device": {
+          "type": "boolean"
+        },
+        "transformations": {
+          "items": {
+            "$ref": "#/components/schemas/TransformationV3"
+          },
+          "type": "array"
+        },
+        "validated_claims": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "video_codecs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "enabled",
+        "supported_on_device",
+        "containers",
+        "video_codecs",
+        "audio_decode_codecs",
+        "audio_passthrough_codecs",
+        "subtitles",
+        "features",
+        "auth_header_refresh",
+        "validated_claims",
+        "transformations"
+      ],
+      "type": "object"
+    },
+    "DeliverySubtitleCapabilitiesV3": {
+      "additionalProperties": false,
+      "properties": {
+        "ass_styling": {
+          "type": "boolean"
+        },
+        "embedded_bitmap": {
+          "type": "boolean"
+        },
+        "embedded_text": {
+          "type": "boolean"
+        },
+        "font_attachments": {
+          "type": "boolean"
+        },
+        "native_embedded": {
+          "items": {
+            "$ref": "#/components/schemas/NativeEmbeddedSubtitleCapabilityV3"
+          },
+          "type": "array"
+        },
+        "sidecar_bitmap": {
+          "type": "boolean"
+        },
+        "sidecar_text": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "embedded_text",
+        "sidecar_text",
+        "ass_styling",
+        "embedded_bitmap",
+        "sidecar_bitmap",
+        "font_attachments"
+      ],
+      "type": "object"
+    },
+    "DeviceContextV3": {
+      "additionalProperties": false,
+      "properties": {
+        "manufacturer": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "os_version": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "platform_details": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "DolbyVisionProfileCapabilityV3": {
+      "additionalProperties": false,
+      "properties": {
+        "bl_compatibility_ids": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "max_level": {
+          "type": "integer"
+        },
+        "profile": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "profile",
+        "max_level"
+      ],
+      "type": "object"
+    },
+    "HDRCapabilitiesV3": {
+      "additionalProperties": false,
+      "properties": {
+        "dolby_vision_profile_levels": {
+          "items": {
+            "$ref": "#/components/schemas/DolbyVisionProfileCapabilityV3"
+          },
+          "type": "array"
+        },
+        "dolby_vision_profiles": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "hdr10": {
+          "type": "boolean"
+        },
+        "hdr10_max_bitrate_kbps": {
+          "type": "integer"
+        },
+        "hdr10_max_frame_rate": {
+          "type": "number"
+        },
+        "hdr10_max_height": {
+          "type": "integer"
+        },
+        "hdr10_max_width": {
+          "type": "integer"
+        },
+        "hdr10_plus": {
+          "type": "boolean"
+        },
+        "hlg": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hdr10",
+        "hdr10_plus",
+        "hlg",
+        "dolby_vision_profiles"
+      ],
+      "type": "object"
+    },
+    "NativeEmbeddedSubtitleCapabilityV3": {
+      "additionalProperties": false,
+      "properties": {
+        "ass_styling": {
+          "type": "boolean"
+        },
+        "codecs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "container": {
+          "type": "string"
+        },
+        "font_attachments": {
+          "type": "boolean"
+        },
+        "track_identity": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "container",
+        "codecs",
+        "track_identity",
+        "ass_styling",
+        "font_attachments"
+      ],
+      "type": "object"
+    },
+    "OutputContextV3": {
+      "additionalProperties": false,
+      "properties": {
+        "audio_passthrough": {
+          "$ref": "#/components/schemas/AudioPassthroughV3"
+        },
+        "current_sink": {
+          "type": "string"
+        },
+        "display": {
+          "$ref": "#/components/schemas/OutputDisplayV3"
+        },
+        "hdr_details": {
+          "$ref": "#/components/schemas/HDRCapabilitiesV3"
+        },
+        "output_context_id": {
+          "type": "string"
+        },
+        "sink_type": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "OutputDisplayV3": {
+      "additionalProperties": false,
+      "properties": {
+        "display_id": {
+          "type": "string"
+        },
+        "hdr_evidence": {
+          "type": "string"
+        },
+        "hdr_types": {
+          "$ref": "#/components/schemas/HDRCapabilitiesV3"
+        }
+      },
+      "required": [
+        "hdr_evidence"
+      ],
+      "type": "object"
+    },
+    "PlaybackProgressBody": {
+      "additionalProperties": false,
+      "properties": {
+        "installation_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "is_paused": {
+          "type": "boolean"
+        },
+        "position": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "sequence": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "installation_id",
+        "sequence",
+        "position",
+        "is_paused"
+      ],
+      "type": "object"
+    },
+    "PlaybackStartBody": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_alternate_versions": {
+          "type": "boolean"
+        },
+        "audio_track_id": {
+          "type": "string"
+        },
+        "audio_track_index": {
+          "type": "integer"
+        },
+        "bandwidth_cap_kbps": {
+          "type": "integer"
+        },
+        "bandwidth_estimate_kbps": {
+          "type": "integer"
+        },
+        "client_capabilities": {
+          "$ref": "#/components/schemas/ClientCodecCapabilitiesV3"
+        },
+        "client_features": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "client_playback_context": {
+          "$ref": "#/components/schemas/ClientPlaybackContextV3"
+        },
+        "file_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "installation_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "metered": {
+          "type": "boolean"
+        },
+        "playback_attempt_id": {
+          "type": "string"
+        },
+        "profile_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "progress_persistence": {
+          "enum": [
+            "server",
+            "client"
+          ],
+          "type": "string"
+        },
+        "protocol_version": {
+          "type": "integer"
+        },
+        "quality_preference": {
+          "type": "string"
+        },
+        "start_position": {
+          "type": "number"
+        },
+        "subtitle_fidelity_preference": {
+          "type": "string"
+        },
+        "subtitle_track_id": {
+          "type": "string"
+        },
+        "subtitle_track_index": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "installation_id",
+        "protocol_version",
+        "client_features",
+        "file_id",
+        "profile_id",
+        "playback_attempt_id",
+        "quality_preference",
+        "subtitle_fidelity_preference",
+        "client_capabilities",
+        "client_playback_context"
+      ],
+      "type": "object"
+    },
+    "PlaybackStopBody": {
+      "additionalProperties": false,
+      "properties": {
+        "installation_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "is_paused": {
+          "type": "boolean"
+        },
+        "position": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "sequence": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stop_id": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "installation_id",
+        "stop_id"
+      ],
+      "type": "object"
+    },
+    "TransformationV3": {
+      "additionalProperties": false,
+      "properties": {
+        "executor": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "recipe_version": {
+          "type": "string"
+        },
+        "validated_claims": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "executor",
+        "recipe_version",
+        "validated_claims"
+      ],
+      "type": "object"
+    },
+    "VideoDecodeCapabilityV3": {
+      "additionalProperties": false,
+      "properties": {
+        "bit_depths": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "codec": {
+          "type": "string"
+        },
+        "decoder_name": {
+          "type": "string"
+        },
+        "hardware": {
+          "type": "boolean"
+        },
+        "levels": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "max_bitrate_kbps": {
+          "type": "integer"
+        },
+        "max_frame_rate": {
+          "type": "number"
+        },
+        "max_height": {
+          "type": "integer"
+        },
+        "max_width": {
+          "type": "integer"
+        },
+        "profiles": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "codec",
+        "hardware"
+      ],
+      "type": "object"
+    }
+  }
+}

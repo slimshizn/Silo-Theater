@@ -1,0 +1,343 @@
+"""Offline contract and token-lifecycle tests; never contact a Silo server."""
+
+import io
+import os
+from pathlib import Path
+import stat
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
+from urllib.error import HTTPError, URLError
+from urllib.request import Request
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "resources" / "lib"))
+
+from silo.api import ApiError, SiloClient, UrllibTransport, _NoRedirect, normalize_server_url
+from silo.storage import SessionStore, StorageError
+
+
+BASE = "https://silo.example/prefix"
+
+
+class Transport:
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def request(self, method, url, headers, body):
+        self.calls.append((method, url, headers, body))
+        if not self.responses:
+            raise AssertionError("Unexpected HTTP request: " + method + " " + url)
+        value = self.responses.pop(0)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
+def response(data=None, status=200, headers=None):
+    return status, headers or {}, data
+
+
+def credentials(**extra):
+    result = {"server_url": BASE, "access_token": "old-access", "refresh_token": "old-refresh",
+              "expires_at": 10000, "profile_id": "p1", "profile_token": "proof"}
+    result.update(extra)
+    return result
+
+
+def tokens(access="new-access", refresh="new-refresh"):
+    return {"access_token": access, "refresh_token": refresh, "expires_in": 3600}
+
+
+class ClientTests(unittest.TestCase):
+    def client(self, transport, store=None):
+        return SiloClient(BASE, store if store is not None else credentials(), transport, clock=lambda: 100)
+
+    def test_reverse_proxy_prefix_and_encoded_catalog_id(self):
+        transport = Transport(response({"content_id": "movie:a/b"}))
+        self.client(transport).item("movie:a/b")
+        self.assertEqual(transport.calls[0][1], BASE + "/api/v2/catalog/items/movie%3Aa%2Fb")
+
+    def test_public_discovery_sends_no_credentials(self):
+        transport = Transport(response({"api_major": 2}), response({"password_login": True}), response({"state": "available"}))
+        client = self.client(transport)
+        client.server_info()
+        client.auth_providers()
+        client.device_capability()
+        for _, _, headers, _ in transport.calls:
+            self.assertNotIn("Authorization", headers)
+            self.assertNotIn("X-Profile-Id", headers)
+            self.assertNotIn("X-Profile-Token", headers)
+
+    def test_login_stores_pair_atomically_and_clears_old_profile(self):
+        data = dict(tokens(), user={"id": "u1"})
+        store = credentials()
+        transport = Transport(response(data))
+        self.client(transport, store).login("alice", "secret", provider="local")
+        self.assertEqual(transport.calls[0][3], {"username": "alice", "password": "secret", "provider": "local"})
+        self.assertEqual(store["access_token"], "new-access")
+        self.assertEqual(store["refresh_token"], "new-refresh")
+        self.assertEqual(store["expires_at"], 3700)
+        self.assertIsNone(store["profile_token"])
+        self.assertEqual(store["auth_method"], "password")
+        self.assertNotIn("password", store)
+
+    def test_failed_login_does_not_replace_existing_session(self):
+        store = credentials()
+        transport = Transport(response({"detail": "Invalid credentials"}, 401))
+        with self.assertRaises(ApiError):
+            self.client(transport, store).login("alice", "wrong")
+        self.assertEqual(store["access_token"], "old-access")
+
+    def test_expiring_token_rotates_before_media_headers_are_created(self):
+        store = credentials(expires_at=120)
+        transport = Transport(response(tokens()))
+        headers = self.client(transport, store).headers()
+        self.assertEqual(headers["Authorization"], "Bearer new-access")
+        self.assertEqual(headers["X-Profile-Token"], "proof")
+        self.assertEqual(transport.calls[0][3], {"refresh_token": "old-refresh"})
+        self.assertNotIn("Authorization", transport.calls[0][2])
+
+    def test_401_refresh_retries_once_with_current_token_and_profile(self):
+        transport = Transport(response({"detail": "expired"}, 401), response(tokens()), response({"sections": []}))
+        store = credentials()
+        self.assertEqual(self.client(transport, store).hubs(), {"sections": []})
+        self.assertEqual(len(transport.calls), 3)
+        self.assertEqual(transport.calls[2][2]["Authorization"], "Bearer new-access")
+        self.assertEqual(transport.calls[2][2]["X-Profile-Id"], "p1")
+
+    def test_second_401_is_not_retried(self):
+        transport = Transport(response({}, 401), response(tokens()), response({}, 401))
+        with self.assertRaises(ApiError) as error:
+            self.client(transport).me()
+        self.assertEqual(error.exception.status, 401)
+        self.assertEqual(len(transport.calls), 3)
+
+    def test_refresh_rejection_clears_session_but_keeps_method_and_installation(self):
+        store = credentials(auth_method="device", installation_id="stable")
+        transport = Transport(response({"detail": "Revoked", "type": "https://x/session_revoked"}, 401))
+        with self.assertRaises(ApiError):
+            self.client(transport, store).refresh()
+        self.assertIsNone(store["access_token"])
+        self.assertIsNone(store["profile_token"])
+        self.assertEqual(store["auth_method"], "device")
+        self.assertEqual(store["installation_id"], "stable")
+
+    def test_refresh_network_failure_preserves_credentials_for_retry(self):
+        store = credentials()
+        transport = Transport(ApiError(0, "Offline"))
+        with self.assertRaises(ApiError):
+            self.client(transport, store).refresh()
+        self.assertEqual(store["refresh_token"], "old-refresh")
+
+    def test_verify_pin_has_no_profile_headers_and_never_replays(self):
+        transport = Transport(response({"type": "https://x/pin_refused", "detail": "Wrong PIN"}, 403))
+        with self.assertRaises(ApiError) as error:
+            self.client(transport).verify_pin("locked/id", "1234")
+        self.assertEqual(error.exception.status, 403)
+        self.assertEqual(error.exception.code, "pin_refused")
+        self.assertEqual(len(transport.calls), 1)
+        _, url, headers, body = transport.calls[0]
+        self.assertTrue(url.endswith("/profiles/locked%2Fid/verify-pin"))
+        self.assertEqual(body, {"pin": "1234"})
+        self.assertNotIn("X-Profile-Id", headers)
+        self.assertNotIn("X-Profile-Token", headers)
+
+    def test_pin_401_does_not_replay(self):
+        transport = Transport(response({}, 401))
+        with self.assertRaises(ApiError):
+            self.client(transport).verify_pin("p1", "1234")
+        self.assertEqual(len(transport.calls), 1)
+
+    def test_select_profile_discards_previous_pin_proof(self):
+        store = credentials()
+        client = self.client(Transport(), store)
+        client.select_profile("p2")
+        self.assertEqual(client.headers()["X-Profile-Id"], "p2")
+        self.assertNotIn("X-Profile-Token", client.headers())
+
+    def test_profiles_and_account_do_not_send_stale_profile_headers(self):
+        transport = Transport(response({"items": []}), response({"id": "u1"}))
+        client = self.client(transport)
+        client.profiles()
+        client.me()
+        self.assertTrue(all("X-Profile-Id" not in call[2] for call in transport.calls))
+
+    def test_logout_local_cleanup_even_when_server_offline(self):
+        store = credentials(auth_method="device")
+        with self.assertRaises(ApiError):
+            self.client(Transport(ApiError(0, "Offline")), store).logout()
+        self.assertIsNone(store["access_token"])
+        self.assertEqual(store["auth_method"], "device")
+
+    def test_switching_servers_never_reuses_previous_credentials(self):
+        store = credentials()
+        client = SiloClient("https://other.example", store, Transport())
+        self.assertIsNone(store["access_token"])
+        with self.assertRaises(ApiError):
+            client.headers()
+
+    def test_search_filters_and_cursor_use_actual_contract(self):
+        transport = Transport(response({"items": [], "page": {"has_more": False}}))
+        self.client(transport).search("a & b", library_id="l1", cursor="opaque/+", content_rating=["R", "PG"], skip_total=True)
+        query = parse_qs(urlsplit(transport.calls[0][1]).query)
+        self.assertEqual(query["q"], ["a & b"])
+        self.assertEqual(query["type"], ["video"])
+        self.assertEqual(query["cursor"], ["opaque/+"])
+        self.assertEqual(query["content_rating"], ["R", "PG"])
+        self.assertEqual(query["skip_total"], ["true"])
+
+    def test_children_normalizes_season_and_episode_type_without_changing_ids(self):
+        transport = Transport(response({"items": [{"content_id": "series:x-S01", "season_number": 1}]}),
+                              response({"items": [{"content_id": "episode:x-s01e01"}]}))
+        client = self.client(transport)
+        seasons = client.children({"content_id": "series:x", "type": "series"})
+        self.assertEqual(seasons["items"][0]["type"], "season")
+        episodes = client.children(seasons["items"][0])
+        self.assertEqual(episodes["items"][0]["type"], "episode")
+        self.assertTrue(transport.calls[1][1].endswith("/catalog/items/series%3Ax-S01/episodes"))
+
+    def test_presigned_images_do_not_include_bearer_credentials(self):
+        client = self.client(Transport())
+        self.assertEqual(client.image_url({"poster_url": "https://cdn.example/image?signature=abc"}),
+                         "https://cdn.example/image?signature=abc")
+        self.assertEqual(client.image_url({"still_url": "art/a.jpg"}), BASE + "/art/a.jpg")
+        self.assertEqual(client.image_url({"poster_url": "file:///etc/passwd"}), "")
+        self.assertEqual(client.image_url({"poster_url": "//other.example/a"}), "")
+        self.assertEqual(client.image_url({"poster_url": "https://cdn.example/a|Authorization=secret"}), "")
+
+    def test_device_approval_saves_tokens_and_bound_profile(self):
+        store = credentials()
+        approved = {"status": "approved", "tokens": dict(tokens(), user={"id": "u1"}),
+                    "profile_id": "p2", "profile_token": "new-proof"}
+        transport = Transport(response(approved))
+        self.client(transport, store).device_poll("secret-device-code")
+        self.assertEqual(store["auth_method"], "device")
+        self.assertEqual(store["profile_id"], "p2")
+        self.assertEqual(store["profile_token"], "new-proof")
+        self.assertNotIn("Authorization", transport.calls[0][2])
+
+    def test_temporary_approval_retains_bound_proof_and_refuses_profile_switch(self):
+        store = credentials()
+        approved = {"status": "approved", "tokens": tokens(), "temporary": True,
+                    "profile_id": "p2", "profile_token": "bound-proof",
+                    "session_expires_at": "2026-10-22T18:00:00Z"}
+        client = self.client(Transport(response(approved)), store)
+        client.device_poll("secret-device-code")
+        self.assertTrue(store["temporary_session"])
+        self.assertEqual(store["bound_profile_id"], "p2")
+        client.select_profile("p2")
+        self.assertEqual(store["profile_token"], "bound-proof")
+        with self.assertRaises(ApiError) as error:
+            client.select_profile("p3")
+        self.assertEqual(error.exception.status, 403)
+        self.assertEqual(store["profile_id"], "p2")
+
+    def test_temporary_approval_without_bound_profile_is_not_saved(self):
+        store = credentials()
+        approved = {"status": "approved", "tokens": tokens(), "temporary": True, "profile_id": ""}
+        with self.assertRaises(ApiError):
+            self.client(Transport(response(approved)), store).device_poll("secret")
+        self.assertEqual(store["access_token"], "old-access")
+
+    def test_full_login_clears_temporary_session_restrictions(self):
+        store = credentials(temporary_session=True, bound_profile_id="p2", session_expires_at="old")
+        self.client(Transport(response(tokens())), store).login("alice", "secret")
+        self.assertFalse(store["temporary_session"])
+        self.assertIsNone(store["bound_profile_id"])
+        self.assertIsNone(store["session_expires_at"])
+
+    def test_invalid_token_pair_preserves_existing_pair(self):
+        for invalid in [{"access_token": "half"}, dict(tokens(), expires_in=float("nan")), dict(tokens(), expires_in=-1)]:
+            with self.subTest(invalid=invalid):
+                store = credentials()
+                with self.assertRaises(ApiError):
+                    self.client(Transport(response(invalid)), store).refresh()
+                self.assertEqual(store["refresh_token"], "old-refresh")
+
+    def test_url_validation_and_absolute_api_path_rejection(self):
+        for invalid in ["ftp://example", "https://user:pw@example", "https://example?token=x", "https://example#secret", "https://example:99999"]:
+            with self.subTest(url=invalid), self.assertRaises(ValueError):
+                normalize_server_url(invalid)
+        client = self.client(Transport())
+        for path in ["https://other.example/api/v2/catalog", "//other.example", "/catalog#fragment"]:
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                client.request("GET", path)
+
+
+class StoreTests(unittest.TestCase):
+    def test_private_atomic_persistence_and_defensive_copies(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "nested", "session.json")
+            store = SessionStore(path)
+            store.update({"access_token": "secret", "refresh_token": "next", "user": {"id": "u1"}})
+            self.assertEqual(SessionStore(path).get("refresh_token"), "next")
+            user = store.get("user")
+            user["id"] = "mutated"
+            self.assertEqual(store.get("user")["id"], "u1")
+            if os.name == "posix":
+                self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+            self.assertEqual(os.listdir(os.path.dirname(path)), ["session.json"])
+
+    def test_failed_atomic_replace_preserves_previous_session(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "session.json")
+            store = SessionStore(path)
+            store.update({"access_token": "old", "refresh_token": "old-refresh"})
+            with patch("silo.storage.os.replace", side_effect=OSError("disk failure")):
+                with self.assertRaises(StorageError):
+                    store.update({"access_token": "new", "refresh_token": "new-refresh"})
+            self.assertEqual(store.get("access_token"), "old")
+            self.assertEqual(SessionStore(path).get("refresh_token"), "old-refresh")
+            self.assertEqual(os.listdir(directory), ["session.json"])
+
+    def test_corrupt_file_is_reported_without_printing_secrets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "session.json")
+            Path(path).write_text("not-json-secret", encoding="utf-8")
+            with self.assertRaises(StorageError) as error:
+                SessionStore(path)
+            self.assertNotIn("secret", str(error.exception))
+
+    @unittest.skipUnless(hasattr(os, "O_NOFOLLOW"), "Platform lacks no-follow file opening")
+    def test_symlink_session_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "target.json"
+            target.write_text("{}", encoding="utf-8")
+            link = Path(directory) / "session.json"
+            link.symlink_to(target)
+            with self.assertRaises(StorageError):
+                SessionStore(link)
+
+
+class TransportTests(unittest.TestCase):
+    def test_redirect_does_not_forward_authentication_or_password(self):
+        request = Request("https://silo.example/api/v2/auth/login", data=b"password=secret",
+                          headers={"Authorization": "Bearer token"})
+        result = _NoRedirect().redirect_request(request, None, 307, "Temporary Redirect", {},
+                                                "https://other.example/collect")
+        self.assertIsNone(result)
+
+    def test_json_error_body_and_status_are_preserved(self):
+        transport = UrllibTransport()
+        error = HTTPError("https://silo.example/api/v2/catalog", 403, "Forbidden",
+                          {"Retry-After": "15"}, io.BytesIO(b'{"detail":"Profile locked"}'))
+        with patch.object(transport.opener, "open", side_effect=error):
+            status, headers, body = transport.request("GET", error.url, {}, None)
+        self.assertEqual(status, 403)
+        self.assertEqual(headers["Retry-After"], "15")
+        self.assertEqual(body["detail"], "Profile locked")
+
+    def test_transport_connection_failure_is_actionable_and_hides_url(self):
+        transport = UrllibTransport()
+        with patch.object(transport.opener, "open", side_effect=URLError("https://private-host/secret")):
+            with self.assertRaises(ApiError) as error:
+                transport.request("GET", "https://silo.example/api/v2/catalog", {}, None)
+        self.assertEqual(error.exception.status, 0)
+        self.assertNotIn("private-host", str(error.exception))
+
+
+if __name__ == "__main__":
+    unittest.main()

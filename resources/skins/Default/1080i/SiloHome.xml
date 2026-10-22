@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<window>
+  <defaultcontrol always="true">100</defaultcontrol>
+  <backgroundcolor>FF101922</backgroundcolor>
+  <coordinates><system>1</system><width>1920</width><height>1080</height></coordinates>
+  <controls>
+    <control type="image"><left>0</left><top>0</top><width>1920</width><height>1080</height><texture colordiffuse="FF101922">white.png</texture></control>
+    <control type="image"><left>0</left><top>0</top><width>260</width><height>1080</height><texture colordiffuse="FF17232E">white.png</texture></control>
+    <control type="label"><left>40</left><top>55</top><width>210</width><height>85</height><font>font30</font><textcolor>FFE6D29A</textcolor><label>S I L O</label></control>
+    <control type="label"><left>320</left><top>65</top><width>1460</width><height>70</height><font>font30</font><textcolor>FFF3F4F4</textcolor><label>$INFO[Window.Property(silo.heading)]</label></control>
+    <control type="label"><left>320</left><top>145</top><width>1460</width><height>45</height><font>font13</font><textcolor>FFA8B5C0</textcolor><label>$INFO[Window.Property(silo.subtitle)]</label></control>
+    <control type="button" id="100"><left>25</left><top>210</top><width>210</width><height>66</height><label>Home</label><font>font13</font><textcolor>FFE3E8EB</textcolor><focusedcolor>FF101922</focusedcolor><texturefocus colordiffuse="FFE6D29A">white.png</texturefocus><texturenofocus colordiffuse="0017232E">white.png</texturenofocus><onup>105</onup><ondown>101</ondown><onright>300</onright><onleft>500</onleft></control>
+    <control type="button" id="101"><left>25</left><top>288</top><width>210</width><height>66</height><label>Search</label><font>font13</font><textcolor>FFE3E8EB</textcolor><focusedcolor>FF101922</focusedcolor><texturefocus colordiffuse="FFE6D29A">white.png</texturefocus><texturenofocus colordiffuse="0017232E">white.png</texturenofocus><onup>100</onup><ondown>102</ondown><onright>300</onright><onleft>500</onleft></control>
+    <control type="button" id="102"><left>25</left><top>366</top><width>210</width><height>66</height><label>Libraries</label><font>font13</font><textcolor>FFE3E8EB</textcolor><focusedcolor>FF101922</focusedcolor><texturefocus colordiffuse="FFE6D29A">white.png</texturefocus><texturenofocus colordiffuse="0017232E">white.png</texturenofocus><onup>101</onup><ondown>103</ondown><onright>300</onright><onleft>500</onleft></control>
+    <control type="button" id="103"><left>25</left><top>680</top><width>210</width><height>66</height><label>Switch profile</label><font>font13</font><textcolor>FFE3E8EB</textcolor><focusedcolor>FF101922</focusedcolor><texturefocus colordiffuse="FFE6D29A">white.png</texturefocus><texturenofocus colordiffuse="0017232E">white.png</texturenofocus><onup>102</onup><ondown>104</ondown><onright>300</onright><onleft>500</onleft><visible>String.IsEmpty(Window.Property(silo.profile_locked))</visible></control>
+    <control type="button" id="104"><left>25</left><top>758</top><width>210</width><height>66</height><label>Settings</label><font>font13</font><textcolor>FFE3E8EB</textcolor><focusedcolor>FF101922</focusedcolor><texturefocus colordiffuse="FFE6D29A">white.png</texturefocus><texturenofocus colordiffuse="0017232E">white.png</texturenofocus><onup>103</onup><ondown>105</ondown><onright>300</onright><onleft>500</onleft></control>
+    <control type="button" id="105"><left>25</left><top>836</top><width>210</width><height>66</height><label>Sign out</label><font>font13</font><textcolor>FFE3E8EB</textcolor><focusedcolor>FF101922</focusedcolor><texturefocus colordiffuse="FFE6D29A">white.png</texturefocus><texturenofocus colordiffuse="0017232E">white.png</texturenofocus><onup>104</onup><ondown>100</ondown><onright>300</onright><onleft>500</onleft></control>
+    <control type="label"><left>35</left><top>968</top><width>200</width><height>35</height><font>font12</font><textcolor>FFA8B5C0</textcolor><label>$INFO[Window.Property(silo.profile)]</label></control>
+    <control type="label"><left>35</left><top>1005</top><width>200</width><height>30</height><font>font12</font><textcolor>FF7F919F</textcolor><label>$INFO[Window.Property(silo.server)]</label></control>
+    <control type="list" id="300">
+      <left>310</left><top>245</top><width>285</width><height>710</height><onleft>100</onleft><onright>500</onright><onup>300</onup><ondown>300</ondown><scrolltime>150</scrolltime>
+      <itemlayout width="285" height="72"><control type="label"><left>16</left><top>8</top><width>250</width><height>54</height><font>font13</font><textcolor>FFAFBEC8</textcolor><label>$INFO[ListItem.Label]</label></control></itemlayout>
+      <focusedlayout width="285" height="72"><control type="image"><left>0</left><top>5</top><width>275</width><height>62</height><texture colordiffuse="FF30404D">white.png</texture></control><control type="label"><left>16</left><top>8</top><width>250</width><height>54</height><font>font13</font><textcolor>FFE6D29A</textcolor><label>$INFO[ListItem.Label]</label></control></focusedlayout>
+    </control>
+    <control type="panel" id="500">
+      <left>640</left><top>245</top><width>1200</width><height>680</height><orientation>vertical</orientation><onleft>300</onleft><onright>100</onright><onup>500</onup><ondown>106</ondown><scrolltime>180</scrolltime>
+      <itemlayout width="240" height="340">
+        <control type="image"><left>8</left><top>8</top><width>218</width><height>260</height><texture colordiffuse="FF263745">white.png</texture></control>
+        <control type="label"><left>22</left><top>92</top><width>188</width><height>100</height><font>font13</font><textcolor>FFAFBEC8</textcolor><align>center</align><wrapmultiline>true</wrapmultiline><label>$INFO[ListItem.Label]</label></control>
+        <control type="image"><left>8</left><top>8</top><width>218</width><height>260</height><aspectratio>scale</aspectratio><texture>$INFO[ListItem.Art(poster)]</texture></control>
+        <control type="label"><left>8</left><top>274</top><width>218</width><height>34</height><font>font13</font><textcolor>FFE3E8EB</textcolor><label>$INFO[ListItem.Label]</label></control>
+        <control type="label"><left>8</left><top>306</top><width>218</width><height>28</height><font>font12</font><textcolor>FF8D9FAA</textcolor><label>$INFO[ListItem.Label2]</label></control>
+      </itemlayout>
+      <focusedlayout width="240" height="340">
+        <control type="image"><left>2</left><top>2</top><width>230</width><height>272</height><texture colordiffuse="FFE6D29A">white.png</texture></control>
+        <control type="image"><left>8</left><top>8</top><width>218</width><height>260</height><texture colordiffuse="FF263745">white.png</texture></control>
+        <control type="label"><left>22</left><top>92</top><width>188</width><height>100</height><font>font13</font><textcolor>FFE6D29A</textcolor><align>center</align><wrapmultiline>true</wrapmultiline><label>$INFO[ListItem.Label]</label></control>
+        <control type="image"><left>8</left><top>8</top><width>218</width><height>260</height><aspectratio>scale</aspectratio><texture>$INFO[ListItem.Art(poster)]</texture></control>
+        <control type="label"><left>8</left><top>274</top><width>218</width><height>34</height><font>font13</font><textcolor>FFE6D29A</textcolor><label>$INFO[ListItem.Label]</label><scroll>true</scroll></control>
+        <control type="label"><left>8</left><top>306</top><width>218</width><height>28</height><font>font12</font><textcolor>FFAFBEC8</textcolor><label>$INFO[ListItem.Label2]</label></control>
+      </focusedlayout>
+    </control>
+    <control type="label"><left>650</left><top>415</top><width>1170</width><height>100</height><font>font13</font><textcolor>FFAFBEC8</textcolor><label>$INFO[Window.Property(silo.empty)]</label></control>
+    <control type="label"><left>650</left><top>955</top><width>890</width><height>45</height><font>font13</font><textcolor>FFA8B5C0</textcolor><label>$INFO[Container(500).ListItem.Property(silo.plot)]</label></control>
+    <control type="button" id="106"><left>1585</left><top>960</top><width>235</width><height>60</height><label>Next page</label><font>font13</font><textcolor>FFE3E8EB</textcolor><focusedcolor>FF101922</focusedcolor><texturefocus colordiffuse="FFE6D29A">white.png</texturefocus><texturenofocus colordiffuse="FF263745">white.png</texturenofocus><onup>500</onup><ondown>500</ondown><onleft>300</onleft><onright>100</onright><enable>!String.IsEmpty(Window.Property(silo.more))</enable><visible>!String.IsEmpty(Window.Property(silo.more))</visible></control>
+  </controls>
+</window>
