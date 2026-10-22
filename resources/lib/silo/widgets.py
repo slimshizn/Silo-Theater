@@ -37,7 +37,7 @@ from .deeplink import ADDON_ID, DEEP_LINK_ACTIONS, deep_link, run_script_builtin
 from .settings import read_options
 from .storage import SessionStore, StorageError, session_path
 
-# The widgets add-on (plugin.video.silotheater) runs this code with Silo Theater's settings and session.
+# The widgets add-on (plugin.video.silotheater) runs this code with Founders Theater's settings and session.
 BASE_URL = "plugin://plugin.video.silotheater/"
 CACHE_SECONDS = 60
 # A failed refresh may show an older copy; presigned art outlives this.
@@ -48,7 +48,7 @@ PERSONAL = (("watchlist", "Watchlist", svc_personal.watchlist),
             ("favorites", "Favorites", svc_personal.favorites))
 MEDIA_TYPES = {"movie": "movie", "episode": "episode", "series": "tvshow", "season": "season"}
 CONTENT_TYPES = {"movie": "movies", "episode": "episodes", "series": "tvshows", "season": "seasons"}
-SIGN_IN_LABEL = "Open Silo Theater to sign in"
+SIGN_IN_LABEL = "Open Founders Theater to sign in"
 
 
 class SignedOut(Exception):
@@ -111,7 +111,7 @@ def connect(addon, client_factory=SiloClient):
     if not (store.get("access_token") or store.get("refresh_token")) or not store.get("profile_id"):
         raise SignedOut()
     version = "".join(char for char in str(addon.getAddonInfo("version")) if char in "0123456789.")[:24]
-    return client_factory(server_url, store, user_agent="SiloTheater/" + version if version else "SiloTheater")
+    return client_factory(server_url, store, user_agent="FoundersTheater/" + version if version else "FoundersTheater")
 
 
 def profile_folder(addon):
@@ -450,7 +450,7 @@ class Plugin:
 
 
 def run(argv, addon=None):
-    """Kodi plugin entry: ``argv = [base_url, handle, query]``; ``addon`` is Silo Theater's."""
+    """Kodi plugin entry: ``argv = [base_url, handle, query]``; ``addon`` is Founders Theater's."""
     try:
         handle = int(argv[1])
     except (IndexError, TypeError, ValueError):

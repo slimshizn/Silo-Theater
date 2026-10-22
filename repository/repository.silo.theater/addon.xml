@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="repository.silo.theater" name="Silo Theater Repository" version="1.0.1" provider-name="slimshizn">
+<addon id="repository.silo.theater" name="Founders Theater Repository" version="1.0.2" provider-name="slimshizn">
   <requires>
     <import addon="xbmc.addon" version="12.0.0" />
   </requires>
-  <extension point="xbmc.addon.repository" name="Silo Theater Repository">
+  <extension point="xbmc.addon.repository" name="Founders Theater Repository">
     <dir>
       <info compressed="false">https://raw.githubusercontent.com/slimshizn/Silo-Theater/gh-pages/addons.xml</info>
       <checksum verify="md5">https://raw.githubusercontent.com/slimshizn/Silo-Theater/gh-pages/addons.xml.md5</checksum>
@@ -12,8 +12,8 @@
     </dir>
   </extension>
   <extension point="xbmc.addon.metadata">
-    <summary lang="en_GB">Install and update Silo Theater for Kodi</summary>
-    <description lang="en_GB">The Silo Theater add-on repository provides installation packages and updates for Silo Theater.</description>
+    <summary lang="en_GB">Install and update Founders Theater for Kodi</summary>
+    <description lang="en_GB">The Founders Theater add-on repository provides installation packages and updates for Founders Theater.</description>
     <license>AGPL-3.0-or-later</license>
     <platform>all</platform>
   </extension>

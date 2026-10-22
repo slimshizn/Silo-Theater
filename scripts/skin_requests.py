@@ -183,7 +183,7 @@ def hub():
               aspect="scale", fade=400, background=True),
         image(0, 0, 1920, 240, "scrim_top.png", color=BLACK),
         group(None, 0, 56, 1920, 64, [
-            image(88, 6, 100, 52, "silo_wordmark.png", aspect="keep"),
+            image(88, 6, 52, 52, "app_mark.png", aspect="keep"),
             label(212, 0, 400, 64, "Requests", "font36_title", TEXT),
         ]),
     ] + search + [preview] + [row_slot(index) for index in range(SLOTS)] + [

@@ -180,8 +180,8 @@ def card_list(list_id, kind, left, top, width, height, item_width, item_height, 
 def top_bar():
     """Wordmark lockup on the left and the screen name as a selected tab in the middle."""
     return group(100, 0, 56, 1920, 64, [
-        image(88, 6, 100, 52, "silo_wordmark.png", aspect="keep"),
-        label(212, 0, 400, 64, "Theater", "font36_title", TEXT),
+        image(88, 6, 52, 52, "app_mark.png", aspect="keep"),
+        label(164, 0, 520, 64, "Founders Theater", "font36_title", TEXT),
         image(860, 2, 200, 60, "pill60_selected.png", border=30, control_id=102, condition=has("silo.title")),
         label(560, 2, 800, 60, "$INFO[{}]".format(prop("silo.title")), "font25_title", TEXT, "center",
               control_id=103),

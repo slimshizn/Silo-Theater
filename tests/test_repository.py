@@ -133,7 +133,7 @@ class RepositoryTests(unittest.TestCase):
 
 
 class WidgetsAddonTests(unittest.TestCase):
-    """Widgets ship as their own add-on so Silo Theater is listed once in Kodi."""
+    """Widgets ship as their own add-on so Founders Theater is listed once in Kodi."""
 
     def test_repository_lists_the_widgets_addon_with_its_four_files(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -14,7 +14,7 @@ SKIN = ROOT / "resources/skins/Default/1080i"
 MEDIA = ROOT / "resources/skins/Default/media"
 sys.path.insert(0, str(ROOT / "resources/lib"))
 
-DISCLAIMER = "Silo Theater is a community add-on for Silo, not an official Silo app."
+DISCLAIMER = "Founders Theater is a community add-on for Silo, not an official Silo app."
 
 
 class FakeListItem:
@@ -809,11 +809,12 @@ class SkinTests(unittest.TestCase):
             tree = ET.parse(SKIN / name)
             labels = [node.findtext("label") for node in tree.iter("control")]
             self.assertIn(DISCLAIMER, labels, name)
-            self.assertIn("Theater", labels, name)
-            wordmark = [node for node in tree.iter("control") if node.findtext("texture") == "silo_wordmark.png"]
-            self.assertEqual(len(wordmark), 1, name)
-            self.assertIsNone(wordmark[0].find("texture").get("colordiffuse"), name)
-            self.assertEqual((wordmark[0].findtext("width"), wordmark[0].findtext("height")), ("100", "52"), name)
+            self.assertIn("Founders Theater", labels, name)
+            # The add-on's own mark, never the Silo wordmark (it must not look official).
+            mark = [node for node in tree.iter("control") if node.findtext("texture") == "app_mark.png"]
+            self.assertEqual(len(mark), 1, name)
+            self.assertEqual((mark[0].findtext("width"), mark[0].findtext("height")), ("52", "52"), name)
+            self.assertNotIn("silo_wordmark.png", (SKIN / name).read_text(encoding="utf-8"), name)
 
     def test_profile_and_code_controls_match_controllers(self):
         profiles = controls_by_id(ET.parse(SKIN / "SiloProfiles.xml"))

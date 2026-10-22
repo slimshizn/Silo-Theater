@@ -1,8 +1,8 @@
-"""Silo Theater Widgets: Kodi plugin entry that reuses Silo Theater's code.
+"""Founders Theater Widgets: Kodi plugin entry that reuses Founders Theater's code.
 
-The widgets live in their own add-on so Silo Theater itself stays a single
+The widgets live in their own add-on so Founders Theater itself stays a single
 program in Kodi's add-on lists. The code, sign-in and settings all belong to
-Silo Theater (script.silo), which this add-on requires.
+Founders Theater (script.silo), which this add-on requires.
 """
 
 import sys

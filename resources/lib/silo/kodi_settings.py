@@ -1,4 +1,4 @@
-"""Kodi's own player settings that Silo Theater offers in its settings.
+"""Kodi's own player settings that Founders Theater offers in its settings.
 
 Frame-rate matching is a Kodi system setting, not an add-on one, so these
 read and write it through JSON-RPC (Settings.GetSettingValue/SetSettingValue)

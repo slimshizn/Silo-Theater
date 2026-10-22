@@ -262,6 +262,68 @@ def draw_shuffle(draw, s):
         draw.polygon([(s * 0.86, s * y), (s * 0.74, s * (y - 0.10)), (s * 0.74, s * (y + 0.10))], fill=OPAQUE)
 
 
+# ------------------------------------------------------------ app identity
+# Founders Theater's own mark: a glowing cinema screen above rows of seats, in
+# warm amber. It is deliberately unlike the Silo logo so the add-on never
+# looks like an official Silo app.
+
+AMBER = (0xF2, 0xA3, 0x3A)
+AMBER_DEEP = (0xC4, 0x6A, 0x1C)
+
+
+def app_mark(size, background=None, badge=False):
+    s = size * SS
+    big = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(big)
+    if background:
+        draw.rounded_rectangle([0, 0, s - 1, s - 1], s * 0.22, fill=background + (255,))
+    # Light from the screen spills over the seats.
+    glow = Image.new("L", (s, s), 0)
+    ImageDraw.Draw(glow).rounded_rectangle([s * 0.16, s * 0.16, s * 0.84, s * 0.50], s * 0.05, fill=255)
+    glow = glow.filter(ImageFilter.GaussianBlur(s * 0.06)).point(lambda value: int(value * 0.55))
+    layer = Image.new("RGBA", (s, s), AMBER + (0,))
+    layer.putalpha(glow)
+    big = Image.alpha_composite(big, layer)
+    draw = ImageDraw.Draw(big)
+    # The screen: a soft vertical gradient from pale gold to amber.
+    screen = [int(s * 0.18), int(s * 0.18), int(s * 0.82), int(s * 0.48)]
+    gradient = Image.new("RGBA", (screen[2] - screen[0], screen[3] - screen[1]))
+    top, bottom = (0xFF, 0xE2, 0xA8), AMBER
+    height = gradient.height
+    gradient.putdata([tuple(int(top[c] + (bottom[c] - top[c]) * y / max(1, height - 1)) for c in range(3)) + (255,)
+                      for y in range(height) for _ in range(gradient.width)])
+    mask = Image.new("L", gradient.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, gradient.width - 1, gradient.height - 1], s * 0.035, fill=255)
+    big.paste(gradient, (screen[0], screen[1]), mask)
+    # Three curved rows of seats, nearer rows larger and wider.
+    for index, (y, width, seats) in enumerate(((0.60, 0.52, 5), (0.71, 0.62, 6), (0.83, 0.72, 7))):
+        seat_w = s * width / seats
+        start = s * (1 - width) / 2
+        for seat in range(seats):
+            x0 = start + seat * seat_w + seat_w * 0.12
+            x1 = start + (seat + 1) * seat_w - seat_w * 0.12
+            # Rows curve up at the ends, like an auditorium seen from the back.
+            lift = s * 0.05 * ((seat - (seats - 1) / 2) / ((seats - 1) / 2)) ** 2
+            y0 = s * y - lift
+            height = s * (0.07 + 0.012 * index)
+            color = AMBER_DEEP + (255,) if index < 2 else AMBER + (255,)
+            # A seat back: round on top, square at the base.
+            draw.rounded_rectangle([x0, y0, x1, y0 + height], (x1 - x0) / 2, fill=color)
+            draw.rectangle([x0, y0 + height / 2, x1, y0 + height], fill=color)
+    if badge:
+        # The widgets add-on: a small grid badge in the corner.
+        r = s * 0.17
+        cx, cy = s * 0.80, s * 0.80
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(0x12, 0x12, 0x14, 255), outline=AMBER + (255,),
+                     width=int(s * 0.02))
+        for dx in (-1, 1):
+            for dy in (-1, 1):
+                q = s * 0.045
+                draw.rounded_rectangle([cx + dx * q * 1.15 - q, cy + dy * q * 1.15 - q,
+                                        cx + dx * q * 1.15 + q, cy + dy * q * 1.15 + q], s * 0.01, fill=AMBER + (255,))
+    return _down(big, (size, size))
+
+
 def brand_light(size):
     """Soft blue, red and orange light for the sign-in and profile screens."""
     width, height = size
@@ -321,6 +383,7 @@ def textures():
         "scrim_bottom.png": gradient_mask((8, 128), vertical=((0.5, 0), (1, 0.6))),
         "scrim_left.png": gradient_mask((480, 8), horizontal=((0, 0.80), (0.35, 0.55), (0.70, 0.20), (1, 0.10))),
         "brand_light.png": brand_light((960, 540)),
+        "app_mark.png": app_mark(256),
         # Icons, drawn white for colordiffuse tinting.
         "icon_search.png": icon(draw_search),
         "icon_play.png": icon(draw_play),
@@ -341,7 +404,16 @@ def textures():
     }
 
 
+ICONS = {
+    "resources/icon.png": lambda: app_mark(512, background=(0x12, 0x12, 0x14)),
+    "widgets/icon.png": lambda: app_mark(512, background=(0x12, 0x12, 0x14), badge=True),
+}
+
+
 def main():
+    for relative, draw_icon in ICONS.items():
+        draw_icon().convert("RGB").save(ROOT / relative, optimize=True)
+        print("wrote", relative)
     MEDIA.mkdir(parents=True, exist_ok=True)
     for name, image in sorted(textures().items()):
         image.save(MEDIA / name, optimize=True)

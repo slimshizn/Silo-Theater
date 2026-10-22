@@ -185,7 +185,7 @@ class WidgetTestCase(unittest.TestCase):
         values.update(extra)
         SessionStore(os.path.join(self.folder, "session.json")).update(values)
 
-    def factory(self, server_url, store, user_agent="SiloTheater"):
+    def factory(self, server_url, store, user_agent="FoundersTheater"):
         return SiloClient(server_url, store, transport=self.transport, user_agent=user_agent)
 
     def run_plugin(self, query=""):
@@ -302,7 +302,7 @@ class SignedOutTest(WidgetTestCase):
     def assert_sign_in_item(self, items):
         self.assertEqual(len(items), 1)
         url, entry, folder = items[0]
-        self.assertEqual(entry.label, "Open Silo Theater to sign in")
+        self.assertEqual(entry.label, "Open Founders Theater to sign in")
         self.assertEqual(url, "plugin://plugin.video.silotheater/?action=signin")
         self.assertFalse(folder)
         self.assertTrue(plugin.ended)

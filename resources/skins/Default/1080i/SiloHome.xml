@@ -6128,21 +6128,21 @@
       <control type="image">
         <left>88</left>
         <top>6</top>
-        <width>100</width>
+        <width>52</width>
         <height>52</height>
         <aspectratio>keep</aspectratio>
-        <texture>silo_wordmark.png</texture>
+        <texture>app_mark.png</texture>
       </control>
       <control type="label">
-        <left>212</left>
+        <left>164</left>
         <top>0</top>
-        <width>400</width>
+        <width>520</width>
         <height>64</height>
         <font>font36_title</font>
         <textcolor>FFEDEDED</textcolor>
         <align>left</align>
         <aligny>center</aligny>
-        <label>Theater</label>
+        <label>Founders Theater</label>
       </control>
       <control type="group" id="202">
         <left>404</left>

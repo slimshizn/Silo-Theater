@@ -12,7 +12,9 @@ from xml.sax.saxutils import escape
 
 FILE_NAME = "silo_theater.xml"
 SCRIPT = "resources/player_menu.py"
-MARKER = "<!-- Written by Silo Theater; turn off in its settings to remove. -->"
+MARKER = "<!-- Written by Founders Theater; turn off in its settings to remove. -->"
+# Files written before the add-on was renamed are still this add-on's to update or remove.
+LEGACY_MARKERS = ("<!-- Written by Silo Theater; turn off in its settings to remove. -->",)
 
 
 def keymap_xml(addon_path):
@@ -48,7 +50,7 @@ def sync(folder, enabled, addon_path):
             existing = handle.read()
     except OSError:
         pass
-    if existing is not None and MARKER not in existing:
+    if existing is not None and not any(marker in existing for marker in (MARKER,) + LEGACY_MARKERS):
         return False
     if enabled:
         content = keymap_xml(addon_path)

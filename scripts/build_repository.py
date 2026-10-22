@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build deterministic Kodi repository files for the Silo Theater website."""
+"""Build deterministic Kodi repository files for the Founders Theater website."""
 
 from __future__ import annotations
 

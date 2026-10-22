@@ -104,7 +104,7 @@ class SiloClient:
                  "profile_id", "profile_token", "profile_token_expires_at",
                  "temporary_session", "bound_profile_id", "session_expires_at", "auth_session_id")
 
-    def __init__(self, server_url, store, transport=None, clock=None, user_agent="SiloTheater"):
+    def __init__(self, server_url, store, transport=None, clock=None, user_agent="FoundersTheater"):
         self.server_url = normalize_server_url(server_url)
         self.store = store
         self.transport = transport or UrllibTransport()

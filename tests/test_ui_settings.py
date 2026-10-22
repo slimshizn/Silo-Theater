@@ -516,7 +516,7 @@ class DiagnosticsTests(unittest.TestCase):
         parts = [part for part in body.split(b"--" + boundary) if part.strip(b"-\r\n")]
         manifest = json.loads(parts[0].split(b"\r\n\r\n", 1)[1].rstrip(b"\r\n"))
         self.assertEqual(manifest["report"]["type"], "manual")
-        self.assertEqual(manifest["report"]["app_version"], "Silo Theater 0.5.0")
+        self.assertEqual(manifest["report"]["app_version"], "Founders Theater 0.5.0")
         self.assertEqual(manifest["report"]["app_build"], "21.1")
         self.assertEqual(manifest["report"]["os_version"], "Android 12")
         self.assertEqual(manifest["destination"]["server_instance_id"], "example-instance")

@@ -352,7 +352,7 @@ def build_report(capabilities, info, now=None, session_id=None):
     stamp = _instant(now)
     device = {
         "captured_at": stamp, "provenance": "pre_failure",
-        "identity": {"client": "Silo Theater (Kodi add-on)", "app_version": info.get("app_version") or "unknown",
+        "identity": {"client": "Founders Theater (Kodi add-on)", "app_version": info.get("app_version") or "unknown",
                      "kodi_version": info.get("kodi_version") or "unknown"},
         "display": "not_collected", "audio": "not_collected", "video_codecs": "not_collected",
         "network": "not_collected",
@@ -364,7 +364,7 @@ def build_report(capabilities, info, now=None, session_id=None):
     manifest = {
         "schema_version": 1,
         "report": {"type": "manual", "captured_at": stamp, "capture_session_id": session_id or str(uuid.uuid4()),
-                   "app_version": ("Silo Theater " + str(info.get("app_version") or "")).strip()[:64],
+                   "app_version": ("Founders Theater " + str(info.get("app_version") or "")).strip()[:64],
                    "app_build": str(info.get("kodi_version") or "unknown")[:64],
                    "platform": DIAGNOSTICS_PLATFORM, "os_version": str(info.get("os") or "unknown")[:128]},
         "destination": {"server_instance_id": str(capabilities.get("server_instance_id") or "")},

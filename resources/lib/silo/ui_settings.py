@@ -94,7 +94,7 @@ THIS_DEVICE = ("This device", (
 ACCOUNT = ("Account", (
     row(ACTION, "Manage profiles", "manage_profiles", hint="Add, change or delete the profiles on this account."),
     row(ACTION, "Send diagnostics report", "diagnostics",
-        hint="Sends this device's versions and Silo Theater settings to the server's administrator."),
+        hint="Sends this device's versions and Founders Theater settings to the server's administrator."),
     row(ACTION, "Switch server", "server", hint="Signs out and connects to another Silo server."),
     row(ACTION, "Sign out", "logout"),
 ))
@@ -421,8 +421,8 @@ def diagnostics_info(application):
     return info
 
 
-DIAGNOSTICS_NOTICE = ("Send a report to the administrator of this Silo server? It contains the Silo Theater "
-                      "and Kodi versions, the operating system and this device's Silo Theater settings. It never "
+DIAGNOSTICS_NOTICE = ("Send a report to the administrator of this Silo server? It contains the Founders Theater "
+                      "and Kodi versions, the operating system and this device's Founders Theater settings. It never "
                       "contains passwords, sign-in tokens, server addresses or file paths.")
 
 

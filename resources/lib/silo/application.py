@@ -43,8 +43,8 @@ class Application:
         self.deep_link = deep_link([str(arg) for arg in (argv or [])[1:]])
         home = xbmcgui.Window(10000) if hasattr(xbmcgui, "Window") else None
         if home is not None and self.deep_link and home.getProperty("silo.running"):
-            # A widget click while Silo Theater is open: never start a second copy.
-            self.dialog.notification("Silo Theater", "Silo Theater is already open.", time=3000, sound=False)
+            # A widget click while Founders Theater is open: never start a second copy.
+            self.dialog.notification("Founders Theater", "Founders Theater is already open.", time=3000, sound=False)
             return
         if home is not None:
             home.setProperty("silo.running", "1")
@@ -237,7 +237,7 @@ class Application:
     def _connect(self, server_url):
         version = "".join(char for char in str(self.addon.getAddonInfo("version")) if char in "0123456789.")[:24]
         self.client = SiloClient(server_url, self.store,
-                                 user_agent="SiloTheater/" + version if version else "SiloTheater")
+                                 user_agent="FoundersTheater/" + version if version else "FoundersTheater")
         self.server_name = urlsplit(self.client.server_url).hostname or "Silo"
 
     # The default display setting declares SDR and 1080p, and this build plays

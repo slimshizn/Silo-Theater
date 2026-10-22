@@ -1,8 +1,8 @@
-# Silo Theater
+# Founders Theater - Silo for Kodi
 
-Silo Theater brings your Silo media library to **Kodi 21 or newer**, with a TV interface modeled on the Silo Android TV app and Kodi's built-in video player.
+Founders Theater brings your Silo media library to **Kodi 21 or newer**, with a TV interface modeled on the Silo Android TV app and Kodi's built-in video player.
 
-Silo Theater is a community project. It is not an official Silo app and is not made or endorsed by the Silo team. The Silo name and logo are trademarks of Silo Media L.L.C. and are not covered by this project's license.
+Founders Theater is a community project. It is not an official Silo app and is not made or endorsed by the Silo team. Silo is a trademark of Silo Media L.L.C.
 
 ## Features
 
@@ -19,20 +19,20 @@ Silo Theater is a community project. It is not an official Silo app and is not m
 - Up next with a countdown, Are you still watching?, and rewind when resuming.
 - A Silo player menu during playback: info, stats, version, quality, speed, aspect, sleep timer, audio, subtitles (including online search, AI translation and sync to audio) and chapters.
 - Silo Settings for your profile and this device; switch between several Silo servers.
-- Widgets for Kodi's own home screen with the optional **Silo Theater Widgets** add-on: your Silo rows, Watchlist and Favorites.
+- Widgets for Kodi's own home screen with the optional **Founders Theater Widgets** add-on: your Silo rows, Watchlist and Favorites.
 
 ## Install in Kodi
 
-1. Open **Settings → File manager → Add source** and enter `https://slimshizn.github.io/Silo-Theater/`. Name the source **Silo Theater**.
-2. Open **Add-ons → Install from zip file → Silo Theater**. Enable installation from unknown sources if prompted.
-3. Select **repository.silo.theater-1.0.1.zip**.
-4. Open **Install from repository → Silo Theater Repository**, find **Silo Theater**, and select **Install**.
+1. Open **Settings → File manager → Add source** and enter `https://slimshizn.github.io/Silo-Theater/`. Name the source **Founders Theater**.
+2. Open **Add-ons → Install from zip file → Founders Theater**. Enable installation from unknown sources if prompted.
+3. Select **repository.silo.theater-1.0.2.zip**.
+4. Open **Install from repository → Founders Theater Repository**, find **Founders Theater**, and select **Install**.
 
-Open **Silo Theater** in Kodi and enter your server URL and Silo account username and password on the sign-in screen. Native Silo code sign-in is also available when your server supports it. Valid sessions and your last profile are reused on later launches; locked profiles still require their PIN. Server URLs with a reverse-proxy path prefix are supported.
+Open **Founders Theater** in Kodi and enter your server URL and Silo account username and password on the sign-in screen. Native Silo code sign-in is also available when your server supports it. Valid sessions and your last profile are reused on later launches; locked profiles still require their PIN. Server URLs with a reverse-proxy path prefix are supported.
 
-For Silo rows on Kodi's own home screen, also install **Silo Theater Widgets** from the same repository (**Video add-ons**). Point your skin's widgets at its folders; selecting a title plays it in Silo Theater.
+For Silo rows on Kodi's own home screen, also install **Founders Theater Widgets** from the same repository (**Video add-ons**). Point your skin's widgets at its folders; selecting a title plays it in Founders Theater.
 
-You can also [download the repository installer](https://slimshizn.github.io/Silo-Theater/repository.silo.theater-1.0.1.zip) in a browser and transfer it to your Kodi device.
+You can also [download the repository installer](https://slimshizn.github.io/Silo-Theater/repository.silo.theater-1.0.2.zip) in a browser and transfer it to your Kodi device.
 
 On a movie or episode's details screen, **Play** follows your resume preference and shows the resume time when there is one; the round **Start over** button restarts the title. The round **Version** button appears when a title has more than one file and **Subtitles** lets you pick a track, or Off, before you press play; the line under the buttons shows the current choice. A series page plays its next episode directly. Resume points belong to your selected Silo profile.
 
@@ -48,17 +48,17 @@ make build
 make repository
 ```
 
-`make build` creates `dist/script.silo-0.5.3.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
+`make build` creates `dist/script.silo-0.5.4.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
-Version **0.5.3** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** in Settings to limit converted streams.
+Version **0.5.4** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** in Settings to limit converted streams.
 
 ### During playback
 
-Press **Back** to stop a Silo video and return to Silo Theater, as in the Silo apps (turn off **Back stops playback** in Silo Settings → This device to keep Kodi's background playback). Turn on **Match frame rate** there, or answer yes when Silo Theater first asks, to switch the TV to each video's frame rate; Kodi pauses 2 seconds while the TV switches.
+Press **Back** to stop a Silo video and return to Founders Theater, as in the Silo apps (turn off **Back stops playback** in Silo Settings → This device to keep Kodi's background playback). Turn on **Match frame rate** there, or answer yes when Founders Theater first asks, to switch the TV to each video's frame rate; Kodi pauses 2 seconds while the TV switches.
 
-Press **Menu** on the remote (**C** on a keyboard) to open the Silo player menu. It shows playback info and live stats, and lets you change the version, speed, aspect, sleep timer, audio track and subtitles, or jump to a chapter. Audio delay and subtitle style open Kodi's own settings. Kodi passes keys to add-ons only through keymaps, so Silo Theater adds one small keymap file that is active only in fullscreen video; turn off **Silo player menu on the Menu key** in its settings to remove it.
+Press **Menu** on the remote (**C** on a keyboard) to open the Silo player menu. It shows playback info and live stats, and lets you change the version, speed, aspect, sleep timer, audio track and subtitles, or jump to a chapter. Audio delay and subtitle style open Kodi's own settings. Kodi passes keys to add-ons only through keymaps, so Founders Theater adds one small keymap file that is active only in fullscreen video; turn off **Silo player menu on the Menu key** in its settings to remove it.
 
 When your Silo server has intro, recap or credits markers for a file, a **Skip** button appears while that part plays. Turn on auto-skip under **Settings** in the profile menu to skip without asking. Near the end of an episode, **Up next** shows the following episode and plays it after a 10-second countdown; turn off **Play next episode automatically** to wait for your choice instead.
 
@@ -82,4 +82,4 @@ Offline checks cover API requests, authentication, navigation, playback sessions
 
 ## License
 
-Silo Theater is licensed under the **GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`)**. See [LICENSE](LICENSE).
+Founders Theater is licensed under the **GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`)**. See [LICENSE](LICENSE).

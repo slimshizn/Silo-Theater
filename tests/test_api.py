@@ -479,9 +479,9 @@ class DownloadTests(unittest.TestCase):
     def test_user_agent_names_the_add_on_and_can_carry_its_version(self):
         transport = Transport(response({}), response({}))
         self.client(transport).me()
-        self.client(transport, user_agent="SiloTheater/0.2.2").me()
-        self.assertEqual(transport.calls[0][2]["User-Agent"], "SiloTheater")
-        self.assertEqual(transport.calls[1][2]["User-Agent"], "SiloTheater/0.2.2")
+        self.client(transport, user_agent="FoundersTheater/0.2.2").me()
+        self.assertEqual(transport.calls[0][2]["User-Agent"], "FoundersTheater")
+        self.assertEqual(transport.calls[1][2]["User-Agent"], "FoundersTheater/0.2.2")
 
 
 if __name__ == "__main__":
