@@ -817,7 +817,7 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(state.audio_selected, [1])
         self.assertIn("client_selected_audio_track_v1", self.start_claims(client))
 
-    def test_windows_makes_no_startup_track_switch_and_does_not_claim_one(self):
+    def test_windows_applies_the_planned_audio_track_like_other_platforms(self):
         self.audio_streams = ["eng", "fre"]
         self.platform_windows = True
         try:
@@ -825,12 +825,8 @@ class ControllerTests(unittest.TestCase):
             state = self.run_player(client, [(1, None), (2, "stop")], start=0)
         finally:
             del self.audio_streams, self.platform_windows
-        self.assertEqual(state.audio_selected, [])
-        self.assertNotIn("client_selected_audio_track_v1", self.start_claims(client))
-        self.assertTrue(any("startup_track_switch_skipped_windows" in line for line in state.logs))
-        # Playback and reporting otherwise proceed normally.
-        self.assertTrue(any(path.endswith("/progress") for _, path, _ in client.calls))
-        self.assertEqual(client.calls[-1][0], "DELETE")
+        self.assertEqual(state.audio_selected, [1])
+        self.assertIn("client_selected_audio_track_v1", self.start_claims(client))
 
 
     def test_frozen_decoder_gets_a_forward_nudge_and_playback_continues(self):
@@ -857,7 +853,7 @@ class ControllerTests(unittest.TestCase):
         self.assertIs(state.listitem_props.get("<content_lookup>"), False)
         self.assertEqual(state.listitem_props.get("IsPlayable"), "true")
 
-    def test_windows_hands_the_stream_over_bare(self):
+    def test_windows_keeps_the_full_item_handoff(self):
         decision = playable_decision()
         decision["playback_plan"]["stream"]["mime_type"] = "video/x-matroska"
         self.platform_windows = True
@@ -865,8 +861,10 @@ class ControllerTests(unittest.TestCase):
             state = self.run_player(FakeClient(decision), [(1, None), (2, "stop")], start=0)
         finally:
             del self.platform_windows
-        self.assertEqual(state.listitem_props, {})
-        self.assertTrue(any("bare_handoff_windows" in line for line in state.logs))
+        self.assertEqual(state.listitem_props.get("<mime>"), "video/x-matroska")
+        self.assertIs(state.listitem_props.get("<content_lookup>"), False)
+        self.assertEqual(state.listitem_props.get("no-ext-subs-scan"), "true")
+        self.assertFalse(any("windows" in line for line in state.logs))
 
     def test_paused_playback_is_never_nudged(self):
         events = [(1, None), (2, None), (2, "pause")] + [(2, None)] * 40 + [(2, "resume"), (3, "stop")]

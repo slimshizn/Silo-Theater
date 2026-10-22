@@ -13,7 +13,7 @@ AUDIO_CODECS = ("aac", "ac3", "eac3", "truehd", "dts", "flac", "mp3", "opus", "v
 CONTAINERS = ("mkv", "matroska", "mp4", "mov", "avi", "mpegts", "ts", "webm")
 
 
-def playback_capabilities(mode="auto", app_version="0.2.6", max_resolution="auto", client_audio_selection=True):
+def playback_capabilities(mode="auto", app_version="0.2.7", max_resolution="auto", client_audio_selection=True):
     """Return the v2 start body's codec capabilities and playback context.
 
     Kodi's decoder can decode these formats in software, but the first build

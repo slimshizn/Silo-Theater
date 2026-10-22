@@ -36,15 +36,27 @@ make build
 make repository
 ```
 
-`make build` creates `dist/script.silo-0.2.6.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
+`make build` creates `dist/script.silo-0.2.7.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
-Version **0.2.6** supports **original HTTP direct play**. Titles that require remuxing or transcoding may be refused. Auto-next, a custom player overlay and automatic quality switching are not available.
+Version **0.2.7** supports **original HTTP direct play**. Titles that require remuxing or transcoding may be refused. Auto-next, a custom player overlay and automatic quality switching are not available.
 
 The first time Silo reaches your library it asks **What can this TV show?** and sets the display capability from your answer. Until a device is described, Silo declares SDR with a 1080p ceiling, so HDR and 4K titles are refused with a message that names the setting to change. You can change the answer later under **Settings → Playback → HDR and Dolby Vision capability** and **Maximum video resolution**. Select HDR10 or Dolby Vision only for a compatible device and display. Select **Dolby Vision P7 FEL** only when your hardware, firmware and Kodi build support full enhancement-layer decoding.
 
-Silo chooses the audio track and subtitle for each title; Kodi switches to them itself, so a non-default audio track still plays the original file. On Windows, Silo makes no audio-track change when playback starts and Kodi plays the file's default audio track, because switching at startup left playback stuck there. Also on Windows, as a test, Silo hands the stream to Kodi bare: without a MIME type, content-lookup override or item properties, so Kodi probes the stream itself. If Kodi's decoder stops advancing during playback while the stream keeps arriving, Silo nudges playback a few seconds forward to restart it, at most three times in a row. Subtitle files are downloaded by the add-on and given to Kodi as local files, so your sign-in never appears in Kodi's log.
+Silo chooses the audio track and subtitle for each title; Kodi switches to them itself, so a non-default audio track still plays the original file. If Kodi's decoder stops advancing during playback while the stream keeps arriving, Silo nudges playback a few seconds forward to restart it, at most three times in a row. Subtitle files are downloaded by the add-on and given to Kodi as local files, so your sign-in never appears in Kodi's log.
+
+### Playback stops after a few seconds
+
+If video plays for a few seconds and then stops while Silo keeps loading, Kodi's HTTP/2 download may be stalling through a reverse proxy in front of your Silo server. The best fix is on the server side: serve the media hostnames over HTTP/1.1 (for nginx or OpenResty 1.25.1 and newer, `http2 off;` in those server blocks). To fix a single device instead, add this to Kodi's `userdata/advancedsettings.xml` and restart Kodi:
+
+```xml
+<advancedsettings version="1.0">
+  <network>
+    <disablehttp2>true</disablehttp2>
+  </network>
+</advancedsettings>
+```
 
 Offline checks cover API requests, authentication, navigation, playback sessions and packaging. Live Silo playback, skin rendering, subtitles, audio-track selection and full P7 FEL output still require validation on real Kodi devices.
 

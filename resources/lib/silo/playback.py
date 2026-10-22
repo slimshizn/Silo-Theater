@@ -116,7 +116,7 @@ def kodi_media_url(server_url, stream):
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.2.6", options=None):
+    def __init__(self, client, mode="auto", version="0.2.7", options=None):
         self.client, self.mode, self.version = client, mode, version
         self.options = dict(options or {})
         # /api/v2 calls this installation_id, but it identifies the SERVER.
@@ -529,14 +529,7 @@ class PlaybackController:
         options = dict(read_options(self.addon) if options is None else options)
         self.last_result = None
         self.last_reporter = None
-        # On Windows, switching Kodi's audio stream the moment playback starts
-        # reopened the audio and decoder and left playback stuck. Make no
-        # startup track change there, and tell the server Kodi will not select
-        # tracks, so the plan keeps the file's default audio track.
         condition = getattr(xbmc, "getCondVisibility", None)
-        on_windows = bool(condition and condition("System.Platform.Windows"))
-        if on_windows:
-            options["client_audio_selection"] = False
 
         class Player(xbmc.Player):
             # Kodi dispatches these asynchronously. Callbacks only change Python
@@ -624,19 +617,13 @@ class PlaybackController:
             tag = listitem.getVideoInfoTag()
             tag.setTitle(item.get("title", "Silo"))
             tag.setPlot(item.get("overview", ""))
-            if on_windows:
-                # Test: hand the stream to Kodi bare, with no
-                # MIME type, content-lookup override or item properties, so
-                # Kodi probes the URL itself.
-                log_event("bare_handoff_windows")
-            else:
-                listitem.setProperty("IsPlayable", "true")
-                # Silo supplies subtitles itself; never let Kodi probe the stream's
-                # "folder" for subtitle files (Kodi does this for LAN servers).
-                listitem.setProperty("no-ext-subs-scan", "true")
-                if plan["stream"].get("mime_type"):
-                    listitem.setMimeType(plan["stream"]["mime_type"])
-                listitem.setContentLookup(False)
+            listitem.setProperty("IsPlayable", "true")
+            # Silo supplies subtitles itself; never let Kodi probe the stream's
+            # "folder" for subtitle files (Kodi does this for LAN servers).
+            listitem.setProperty("no-ext-subs-scan", "true")
+            if plan["stream"].get("mime_type"):
+                listitem.setMimeType(plan["stream"]["mime_type"])
+            listitem.setContentLookup(False)
             stage = "opening"
             player.play(path, listitem)
             opened = True
@@ -659,9 +646,7 @@ class PlaybackController:
                 player.seekTime(start)
             stage = "track_setup"
             audio_index = (plan.get("selected_tracks", {}).get("audio") or {}).get("index")
-            if on_windows:
-                log_event("startup_track_switch_skipped_windows")
-            elif not player.finished and audio_index is not None:
+            if not player.finished and audio_index is not None:
                 streams = player.getAvailableAudioStreams()
                 if not player.finished and 0 <= audio_index < len(streams):
                     player.setAudioStream(audio_index)
