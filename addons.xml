@@ -1,5 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <addons>
+  <addon id="plugin.video.silotheater" name="Silo Theater Widgets" version="1.0.0" provider-name="slimshizn">
+    <requires>
+      <import addon="xbmc.python" version="3.0.1" />
+      <import addon="script.silo" version="0.5.3" />
+    </requires>
+    <extension point="xbmc.python.pluginsource" library="default.py">
+      <provides>video</provides>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+      <summary lang="en_GB">Silo rows as widgets for Kodi's home screen</summary>
+      <description lang="en_GB">Shows your Silo home rows, Watchlist and Favorites as video folders that Kodi skins can use as home-screen widgets. Selecting a title plays it in Silo Theater, which must be installed and signed in. A community add-on, not an official Silo app.</description>
+      <license>AGPL-3.0-or-later</license>
+      <platform>all</platform>
+      <assets>
+        <icon>icon.png</icon>
+      </assets>
+    </extension>
+  </addon>
   <addon id="repository.silo.theater" name="Silo Theater Repository" version="1.0.1" provider-name="slimshizn">
     <requires>
       <import addon="xbmc.addon" version="12.0.0" />
@@ -19,15 +37,12 @@
       <platform>all</platform>
     </extension>
   </addon>
-  <addon id="script.silo" name="Silo Theater" version="0.5.2" provider-name="slimshizn">
+  <addon id="script.silo" name="Silo Theater" version="0.5.3" provider-name="slimshizn">
     <requires>
       <import addon="xbmc.python" version="3.0.1" />
       <import addon="xbmc.gui" version="5.17.0" />
     </requires>
     <extension point="xbmc.python.script" library="default.py">
-      <provides>video</provides>
-    </extension>
-    <extension point="xbmc.python.pluginsource" library="widgets_entry.py">
       <provides>video</provides>
     </extension>
     <extension point="xbmc.addon.metadata">
