@@ -45,11 +45,11 @@ make build
 make repository
 ```
 
-`make build` creates `dist/script.silo-0.4.0.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
+`make build` creates `dist/script.silo-0.4.1.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
-Version **0.4.0** supports **original HTTP direct play**. Titles that require remuxing or transcoding may be refused, and quality switching is not available.
+Version **0.4.1** supports **original HTTP direct play**. Titles that require remuxing or transcoding may be refused, and quality switching is not available.
 
 ### During playback
 

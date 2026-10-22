@@ -63,7 +63,7 @@ class Action:
         return self.action_id
 
 
-UP, DOWN, BACK = 3, 4, 10
+LEFT, UP, DOWN, BACK = 1, 3, 4, 10
 PLAYBACK, AUDIO, DEVICE = 0, 1, 2
 
 
@@ -133,9 +133,9 @@ def row_index(window, key):
 
 
 def select_category(window, index):
-    window.setFocusId(ui_settings.RAIL)
-    window.getControl(ui_settings.RAIL).getSelectedPosition.return_value = index
-    window.onAction(Action(DOWN))
+    # Kodi moves focus to the category's button and reports it through onFocus.
+    window.setFocusId(ui_settings.RAIL_BUTTONS[index])
+    window.onFocus(ui_settings.RAIL_BUTTONS[index])
 
 
 def click(window, key):
@@ -149,9 +149,10 @@ class LayoutTests(unittest.TestCase):
     def test_opens_on_playback_with_profile_name_and_three_categories(self):
         window = open_window()
         self.assertEqual(window.properties["silo.subtitle"], "Settings for Example Profile")
-        items = window.getControl(ui_settings.RAIL).addItems.call_args[0][0]
-        self.assertEqual(len(items), 3)
+        self.assertEqual([window.getControl(cid).setLabel.call_args[0][0] for cid in ui_settings.RAIL_BUTTONS],
+                         ["Playback", "Audio and subtitles", "This device"])
         self.assertEqual(window.focus, ui_settings.RAIL)
+        self.assertEqual(window.properties["silo.category"], "0")
         labels = [window.getControl(button(index)).setLabel.call_args[0][0] for index in range(4)]
         self.assertEqual(labels, ["Skip intros automatically", "Skip credits automatically",
                                   "Skip recaps automatically", "Quality preference"])
@@ -188,10 +189,31 @@ class LayoutTests(unittest.TestCase):
 
     def test_temporary_session_shows_only_this_device(self):
         window = open_window(make_application(profile={"id": 7}))
-        items = window.getControl(ui_settings.RAIL).addItems.call_args[0][0]
-        self.assertEqual(len(items), 1)
+        self.assertEqual(window.getControl(ui_settings.RAIL_BUTTONS[0]).setLabel.call_args[0][0], "This device")
+        for cid in ui_settings.RAIL_BUTTONS[1:]:
+            window.getControl(cid).setVisible.assert_called_with(False)
         self.assertEqual([item["key"] for item in window.rows()],
                          ["auto_next", "skip_prompts", "player_menu_key", None])
+
+    def test_every_category_shows_its_rows_when_focused_or_clicked(self):
+        window = open_window()
+        select_category(window, 1)
+        self.assertEqual(window.properties["silo.category"], "1")
+        self.assertEqual(window.getControl(button(0)).setLabel.call_args[0][0], "Audio language")
+        window.onClick(ui_settings.RAIL_BUTTONS[2])
+        self.assertEqual(window.getControl(button(0)).setLabel.call_args[0][0], "Play next episode automatically")
+        self.assertEqual(window.focus, button(0))
+        # A missed focus callback is caught on the next key press.
+        window.setFocusId(ui_settings.RAIL_BUTTONS[1])
+        window.onAction(Action(UP))
+        self.assertEqual(window.category, 1)
+
+    def test_left_from_a_row_returns_to_the_open_category(self):
+        window = open_window()
+        select_category(window, 1)
+        window.setFocusId(button(2))
+        window.onAction(Action(LEFT))
+        self.assertEqual(window.focus, ui_settings.RAIL_BUTTONS[1])
 
     def test_back_closes_without_result(self):
         window = open_window()
@@ -343,7 +365,7 @@ class SkinTests(unittest.TestCase):
 
     def test_python_control_ids_exist(self):
         ids = set(self.ids)
-        wanted = [ui_settings.RAIL, ui_settings.HINT]
+        wanted = [*ui_settings.RAIL_BUTTONS, *ui_settings.RAIL_FILLS, ui_settings.HINT]
         wanted += [control for index in range(ui_settings.SLOTS) for control in ui_settings.slot_ids(index)]
         for control in wanted:
             self.assertIn(str(control), ids)

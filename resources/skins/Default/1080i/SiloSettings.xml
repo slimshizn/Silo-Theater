@@ -2,7 +2,7 @@
 <!-- Silo settings. resources/lib/silo/ui_settings.py fills the rows and moves them so the
      focused row's hint sits directly under it. -->
 <window>
-  <defaultcontrol always="true">100</defaultcontrol>
+  <defaultcontrol always="true">101</defaultcontrol>
   <backgroundcolor>FF000000</backgroundcolor>
   <coordinates>
     <left>0</left>
@@ -64,73 +64,87 @@
       <aligny>center</aligny>
       <label>$INFO[Window.Property(silo.subtitle)]</label>
     </control>
-    <!-- Category rail. Unfocused, the chosen category keeps a soft fill; focused, it inverts. -->
-    <control type="list" id="100">
+    <!-- Category rail: one button per category; Python shows the focused category's rows. -->
+    <control type="image" id="111">
       <left>88</left>
       <top>312</top>
       <width>490</width>
-      <height>680</height>
-      <orientation>vertical</orientation>
-      <scrolltime tween="cubic" easing="out">200</scrolltime>
-      <onup>100</onup>
-      <ondown>100</ondown>
-      <onleft>100</onleft>
+      <height>76</height>
+      <texture border="16" colordiffuse="24FFFFFF">round16.png</texture>
+      <visible>String.IsEqual(Window.Property(silo.category),0) + !Control.HasFocus(101)</visible>
+    </control>
+    <control type="button" id="101">
+      <left>88</left>
+      <top>312</top>
+      <width>490</width>
+      <height>76</height>
+      <label/>
+      <font>font27</font>
+      <textcolor>BFEDEDED</textcolor>
+      <focusedcolor>FF000000</focusedcolor>
+      <align>left</align>
+      <aligny>center</aligny>
+      <textoffsetx>24</textoffsetx>
+      <texturefocus border="16" colordiffuse="FFEDEDED">round16.png</texturefocus>
+      <texturenofocus border="16" colordiffuse="00FFFFFF">round16.png</texturenofocus>
+      <onup>101</onup>
+      <ondown>102</ondown>
+      <onleft>101</onleft>
       <onright>1001</onright>
-      <itemlayout width="490" height="84">
-        <control type="label">
-          <left>24</left>
-          <top>0</top>
-          <width>442</width>
-          <height>76</height>
-          <font>font27</font>
-          <textcolor>BFEDEDED</textcolor>
-          <align>left</align>
-          <aligny>center</aligny>
-          <label>$INFO[ListItem.Label]</label>
-        </control>
-      </itemlayout>
-      <focusedlayout width="490" height="84">
-        <control type="image">
-          <left>0</left>
-          <top>0</top>
-          <width>490</width>
-          <height>76</height>
-          <texture border="16" colordiffuse="24FFFFFF">round16.png</texture>
-          <visible>!Control.HasFocus(100)</visible>
-        </control>
-        <control type="image">
-          <left>0</left>
-          <top>0</top>
-          <width>490</width>
-          <height>76</height>
-          <texture border="16" colordiffuse="FFEDEDED">round16.png</texture>
-          <visible>Control.HasFocus(100)</visible>
-        </control>
-        <control type="label">
-          <left>24</left>
-          <top>0</top>
-          <width>442</width>
-          <height>76</height>
-          <font>font27</font>
-          <textcolor>FFEDEDED</textcolor>
-          <align>left</align>
-          <aligny>center</aligny>
-          <label>$INFO[ListItem.Label]</label>
-          <visible>!Control.HasFocus(100)</visible>
-        </control>
-        <control type="label">
-          <left>24</left>
-          <top>0</top>
-          <width>442</width>
-          <height>76</height>
-          <font>font27</font>
-          <textcolor>FF000000</textcolor>
-          <align>left</align>
-          <aligny>center</aligny>
-          <label>$INFO[ListItem.Label]</label>
-          <visible>Control.HasFocus(100)</visible>
-        </control>
-      </focusedlayout>
+    </control>
+    <control type="image" id="112">
+      <left>88</left>
+      <top>396</top>
+      <width>490</width>
+      <height>76</height>
+      <texture border="16" colordiffuse="24FFFFFF">round16.png</texture>
+      <visible>String.IsEqual(Window.Property(silo.category),1) + !Control.HasFocus(102)</visible>
+    </control>
+    <control type="button" id="102">
+      <left>88</left>
+      <top>396</top>
+      <width>490</width>
+      <height>76</height>
+      <label/>
+      <font>font27</font>
+      <textcolor>BFEDEDED</textcolor>
+      <focusedcolor>FF000000</focusedcolor>
+      <align>left</align>
+      <aligny>center</aligny>
+      <textoffsetx>24</textoffsetx>
+      <texturefocus border="16" colordiffuse="FFEDEDED">round16.png</texturefocus>
+      <texturenofocus border="16" colordiffuse="00FFFFFF">round16.png</texturenofocus>
+      <onup>101</onup>
+      <ondown>103</ondown>
+      <onleft>102</onleft>
+      <onright>1001</onright>
+    </control>
+    <control type="image" id="113">
+      <left>88</left>
+      <top>480</top>
+      <width>490</width>
+      <height>76</height>
+      <texture border="16" colordiffuse="24FFFFFF">round16.png</texture>
+      <visible>String.IsEqual(Window.Property(silo.category),2) + !Control.HasFocus(103)</visible>
+    </control>
+    <control type="button" id="103">
+      <left>88</left>
+      <top>480</top>
+      <width>490</width>
+      <height>76</height>
+      <label/>
+      <font>font27</font>
+      <textcolor>BFEDEDED</textcolor>
+      <focusedcolor>FF000000</focusedcolor>
+      <align>left</align>
+      <aligny>center</aligny>
+      <textoffsetx>24</textoffsetx>
+      <texturefocus border="16" colordiffuse="FFEDEDED">round16.png</texturefocus>
+      <texturenofocus border="16" colordiffuse="00FFFFFF">round16.png</texturenofocus>
+      <onup>102</onup>
+      <ondown>103</ondown>
+      <onleft>103</onleft>
+      <onright>1001</onright>
     </control>
     <!-- Setting rows: slot k is group 1000+10k, button +1, value +2, value on focus +3.
          Python owns up/down so it can open space for the hint under the focused row. -->
@@ -155,7 +169,7 @@
         <texturenofocus border="16" colordiffuse="00FFFFFF">round16.png</texturenofocus>
         <onup>1001</onup>
         <ondown>1001</ondown>
-        <onleft>100</onleft>
+        <onleft>1001</onleft>
         <onright>1001</onright>
       </control>
       <control type="label" id="1002">
@@ -204,7 +218,7 @@
         <texturenofocus border="16" colordiffuse="00FFFFFF">round16.png</texturenofocus>
         <onup>1011</onup>
         <ondown>1011</ondown>
-        <onleft>100</onleft>
+        <onleft>1011</onleft>
         <onright>1011</onright>
       </control>
       <control type="label" id="1012">
@@ -253,7 +267,7 @@
         <texturenofocus border="16" colordiffuse="00FFFFFF">round16.png</texturenofocus>
         <onup>1021</onup>
         <ondown>1021</ondown>
-        <onleft>100</onleft>
+        <onleft>1021</onleft>
         <onright>1021</onright>
       </control>
       <control type="label" id="1022">
@@ -302,7 +316,7 @@
         <texturenofocus border="16" colordiffuse="00FFFFFF">round16.png</texturenofocus>
         <onup>1031</onup>
         <ondown>1031</ondown>
-        <onleft>100</onleft>
+        <onleft>1031</onleft>
         <onright>1031</onright>
       </control>
       <control type="label" id="1032">
@@ -351,7 +365,7 @@
         <texturenofocus border="16" colordiffuse="00FFFFFF">round16.png</texturenofocus>
         <onup>1041</onup>
         <ondown>1041</ondown>
-        <onleft>100</onleft>
+        <onleft>1041</onleft>
         <onright>1041</onright>
       </control>
       <control type="label" id="1042">
@@ -400,7 +414,7 @@
         <texturenofocus border="16" colordiffuse="00FFFFFF">round16.png</texturenofocus>
         <onup>1051</onup>
         <ondown>1051</ondown>
-        <onleft>100</onleft>
+        <onleft>1051</onleft>
         <onright>1051</onright>
       </control>
       <control type="label" id="1052">

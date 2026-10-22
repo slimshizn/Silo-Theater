@@ -3,11 +3,13 @@
 import xbmcgui
 
 from .settings import DEFAULTS
-from .ui_common import ACTION_DOWN, ACTION_UP, BACK_ACTIONS, set_properties
+from .ui_common import ACTION_DOWN, ACTION_LEFT, ACTION_UP, BACK_ACTIONS, set_properties
 
-# Control ids in SiloSettings.xml. Row slot k: group SLOT_BASE + 10k, button +1, value +2,
-# value shown while the row has focus +3.
-RAIL, HINT = 100, 400
+# Control ids in SiloSettings.xml. Categories are buttons (not a list) so Kodi reports
+# every move between them through onFocus. Row slot k: group SLOT_BASE + 10k, button +1,
+# value +2, value shown while the row has focus +3.
+RAIL_BUTTONS, RAIL_FILLS, HINT = (101, 102, 103), (111, 112, 113), 400
+RAIL = RAIL_BUTTONS[0]
 SLOTS, SLOT_BASE = 6, 1000
 ROWS_LEFT, ROWS_TOP, ROW_PITCH, ROW_HEIGHT = 630, 312, 84, 76
 HINT_INDENT, HINT_SPACE = 24, 44
@@ -101,9 +103,12 @@ class SettingsWindow(xbmcgui.WindowXML):
         self.categories = categories(getattr(application, "profile", None))
         name = str(getattr(application, "profile_name", "") or "")
         set_properties(self, {"silo.subtitle": "Settings for " + name if name else "Settings for this device"})
-        rail = self.getControl(RAIL)
-        rail.reset()
-        rail.addItems([xbmcgui.ListItem(label=title) for title, _rows in self.categories])
+        for index, (button, fill) in enumerate(zip(RAIL_BUTTONS, RAIL_FILLS)):
+            shown = index < len(self.categories)
+            if shown:
+                self.getControl(button).setLabel(self.categories[index][0])
+            self.getControl(button).setVisible(shown)
+            self.getControl(fill).setVisible(shown)
         self.show_category(0)
         self.setFocusId(RAIL)
 
@@ -147,6 +152,7 @@ class SettingsWindow(xbmcgui.WindowXML):
     def show_category(self, index):
         self.category = index
         self.row = 0
+        self.setProperty("silo.category", str(index))
         self.render_rows()
 
     def render_rows(self):
@@ -195,6 +201,10 @@ class SettingsWindow(xbmcgui.WindowXML):
     # ------------------------------------------------------------ input
 
     def onFocus(self, control_id):
+        if control_id in RAIL_BUTTONS:
+            category = RAIL_BUTTONS.index(control_id)
+            if category < len(self.categories) and category != self.category:
+                self.show_category(category)
         index = self.row_of(control_id)
         if index is not None:
             self.row = index
@@ -208,21 +218,27 @@ class SettingsWindow(xbmcgui.WindowXML):
             self.close()
             return
         focus = self.focus_id()
-        if focus == RAIL and action_id in (ACTION_UP, ACTION_DOWN):
-            # Kodi has already moved the rail; follow it so the rows match the category.
-            position = self.getControl(RAIL).getSelectedPosition()
-            if 0 <= position < len(self.categories) and position != self.category:
-                self.show_category(position)
+        if focus in RAIL_BUTTONS:
+            # Kodi has already moved between the category buttons; onFocus normally
+            # follows, and this catches a missed focus callback.
+            self.onFocus(focus)
             return
         index = self.row_of(focus)
         if index is None:
             return
-        if action_id == ACTION_UP and index > 0:
+        if action_id == ACTION_LEFT:
+            self.setFocusId(RAIL_BUTTONS[self.category])
+        elif action_id == ACTION_UP and index > 0:
             self.focus_row(index - 1)
         elif action_id == ACTION_DOWN and index + 1 < len(self.rows()):
             self.focus_row(index + 1)
 
     def onClick(self, control_id):
+        if control_id in RAIL_BUTTONS:
+            self.onFocus(control_id)
+            if self.rows():
+                self.focus_row(0)
+            return
         index = self.row_of(control_id)
         if index is not None:
             self.activate(self.rows()[index])
