@@ -19,7 +19,7 @@
       <platform>all</platform>
     </extension>
   </addon>
-  <addon id="script.silo" name="Silo" version="0.2.2" provider-name="slimshizn">
+  <addon id="script.silo" name="Silo" version="0.2.3" provider-name="slimshizn">
     <requires>
       <import addon="xbmc.python" version="3.0.1" />
       <import addon="xbmc.gui" version="5.17.0" />
