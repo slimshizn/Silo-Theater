@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<addons>
+  <addon id="repository.silo.theater" name="Silo Theater Repository" version="1.0.0" provider-name="Silo contributors">
+    <requires>
+      <import addon="xbmc.addon" version="12.0.0" />
+    </requires>
+    <extension point="xbmc.addon.repository" name="Silo Theater Repository">
+      <dir>
+        <info compressed="false">https://slimshizn.github.io/Silo-Theater/addons.xml</info>
+        <checksum verify="md5">https://slimshizn.github.io/Silo-Theater/addons.xml.md5</checksum>
+        <datadir zip="true">https://slimshizn.github.io/Silo-Theater/zips/</datadir>
+        <hashes>sha256</hashes>
+      </dir>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+      <summary lang="en_GB">Install and update Silo Theater for Kodi</summary>
+      <description lang="en_GB">The Silo Theater add-on repository provides installation packages and updates for Silo Theater.</description>
+      <license>AGPL-3.0-or-later</license>
+      <platform>all</platform>
+    </extension>
+  </addon>
+  <addon id="script.silo" name="Silo" version="0.1.0" provider-name="Silo contributors">
+    <requires>
+      <import addon="xbmc.python" version="3.0.1" />
+      <import addon="xbmc.gui" version="5.17.0" />
+    </requires>
+    <extension point="xbmc.python.script" library="default.py">
+      <provides>video</provides>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+      <summary lang="en_GB">A native Silo experience for Kodi</summary>
+      <description lang="en_GB">Browse and play your Silo library using the native Silo API. This early development build establishes the client foundation.</description>
+      <disclaimer lang="en_GB">Early development build. Device playback capabilities require verification on your hardware.</disclaimer>
+      <license>AGPL-3.0-or-later</license>
+      <platform>all</platform>
+    </extension>
+  </addon>
+</addons>

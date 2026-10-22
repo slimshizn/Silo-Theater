@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Install Silo Theater for Kodi. Add this source to Kodi's file manager to browse and play your Silo library on the big screen.">
+    <meta name="theme-color" content="#101922">
+    <title>Silo Theater · Silo for Kodi</title>
+    <style>
+      :root { color-scheme: dark; --ink: #f3f4f4; --muted: #acbac6; --gold: #e6d29a; --line: #30404d; --surface: #17232e; }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body { margin: 0; background: #101922; color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.65; }
+      a { color: var(--gold); text-underline-offset: .23em; }
+      a:hover { color: #fff1cc; }
+      a:focus-visible { outline: 3px solid var(--gold); outline-offset: 6px; border-radius: 2px; }
+      .wrap { width: min(1120px, calc(100% - 64px)); margin-inline: auto; }
+      header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-block: 32px; border-bottom: 1px solid var(--line); }
+      .brand { color: var(--ink); text-decoration: none; font-size: 14px; font-weight: 750; letter-spacing: .2em; }
+      .brand span { color: var(--gold); }
+      .source-link { font-size: 14px; }
+      .hero { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; padding-block: 88px 80px; }
+      .eyebrow { margin: 0 0 20px; color: var(--gold); font-size: 12px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+      h1 { margin: 0 0 24px; max-width: 550px; font-size: clamp(38px, 5vw, 62px); line-height: 1.1; font-weight: 650; letter-spacing: -.045em; }
+      .intro { margin: 0; max-width: 460px; color: var(--muted); font-size: 18px; }
+      .features { display: flex; flex-wrap: wrap; gap: 10px; margin: 28px 0 0; padding: 0; list-style: none; }
+      .features li { border: 1px solid var(--line); border-radius: 100px; padding: 6px 12px; color: var(--muted); font-size: 12px; }
+      .source { position: relative; padding: 32px; border: 1px solid #596052; border-radius: 18px; background: linear-gradient(145deg, #263330, var(--surface) 65%); box-shadow: 0 24px 60px #0003; }
+      .source h2 { margin: 0 0 8px; font-size: 22px; font-weight: 600; letter-spacing: -.025em; }
+      .source p { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
+      .source-url { display: block; padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: #101922; color: var(--ink); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 14px; text-decoration: none; overflow-wrap: anywhere; }
+      .source .installer-label { margin: 24px 0 8px; color: var(--muted); font-size: 12px; }
+      .installer { display: block; padding-block: 6px; font-size: 14px; overflow-wrap: anywhere; }
+      .install { padding-block: 12px 64px; }
+      .section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+      .section-heading h2 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -.03em; }
+      .section-heading p { margin: 0; color: var(--muted); font-size: 14px; }
+      .steps { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+      .steps li { position: relative; padding: 28px 28px 28px 78px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); counter-increment: step; }
+      .steps li::before { content: counter(step); position: absolute; left: 26px; top: 28px; display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid #646952; border-radius: 50%; color: var(--gold); font-size: 14px; }
+      .steps h3 { margin: 0 0 10px; font-size: 17px; font-weight: 600; }
+      .steps p { margin: 0; color: var(--muted); font-size: 14px; }
+      .steps p + p { margin-top: 10px; }
+      .steps strong { color: var(--ink); font-weight: 550; }
+      .steps code { color: var(--gold); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+      .compatibility { display: grid; grid-template-columns: .7fr 1fr; gap: 40px; padding: 30px 0 42px; border-top: 1px solid var(--line); }
+      .compatibility h2 { margin: 0; font-size: 20px; font-weight: 600; }
+      .compatibility p { margin: 0; color: var(--muted); font-size: 14px; }
+      .compatibility p + p { margin-top: 12px; }
+      footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding-block: 26px 40px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+      footer p { margin: 0; }
+      @media (max-width: 850px) { .hero { gap: 36px; padding-block: 60px; } .source { padding: 24px; } .steps li { padding: 24px 22px 24px 65px; } .steps li::before { left: 20px; top: 24px; } }
+      @media (max-width: 650px) { .wrap { width: calc(100% - 40px); } header { padding-block: 24px; } .hero, .steps, .compatibility { grid-template-columns: 1fr; } .hero { gap: 32px; padding-block: 48px; } h1 { max-width: 440px; } .section-heading { display: block; } .section-heading p { margin-top: 6px; } .compatibility { gap: 16px; } .source-url { font-size: 13px; } }
+      @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <a class="brand" href="#top" aria-label="Silo Theater home"><span>SILO</span> THEATER</a>
+        <a class="source-link" href="https://github.com/slimshizn/Silo-Theater">View on GitHub ↗</a>
+      </header>
+      <main id="top">
+        <section class="hero" aria-labelledby="hero-title">
+          <div>
+            <p class="eyebrow">For Kodi 21 and newer</p>
+            <h1 id="hero-title">Your Silo library.<br>On the big screen.</h1>
+            <p class="intro">Browse your library, pick a profile and press play. Silo Theater connects your Silo server to Kodi with a fullscreen interface built for your remote.</p>
+            <ul class="features" aria-label="Features">
+              <li>Code sign-in</li>
+              <li>Profiles &amp; PINs</li>
+              <li>Search &amp; browse</li>
+              <li>Synced playback progress</li>
+            </ul>
+          </div>
+          <div class="source" aria-labelledby="source-title">
+            <h2 id="source-title">Add the Kodi source</h2>
+            <p>Enter this address in Kodi’s file manager.</p>
+            <a class="source-url" href="https://slimshizn.github.io/Silo-Theater/">https://slimshizn.github.io/Silo-Theater/</a>
+            <p class="installer-label">Repository installer</p>
+            <a class="installer" href="repository.silo.theater-1.0.0.zip">repository.silo.theater-1.0.0.zip</a>
+          </div>
+        </section>
+        <section class="install" aria-labelledby="install-title">
+          <div class="section-heading">
+            <h2 id="install-title">Settle in. Set it up.</h2>
+            <p>A Silo server and Kodi 21+ are required.</p>
+          </div>
+          <ol class="steps">
+            <li>
+              <h3>Add the source</h3>
+              <p>In Kodi, open <strong>Settings → File manager → Add source</strong>. Enter the address above and name it <strong>Silo Theater</strong>.</p>
+            </li>
+            <li>
+              <h3>Install the repository</h3>
+              <p>Open <strong>Add-ons → Install from zip file → Silo Theater</strong>, then select <code>repository.silo.theater-1.0.0.zip</code>.</p>
+              <p>If prompted, allow <strong>Unknown sources</strong> in <strong>Settings → System → Add-ons</strong>.</p>
+            </li>
+            <li>
+              <h3>Install Silo</h3>
+              <p>Choose <strong>Install from repository → Silo Theater Repository</strong>, find <strong>Silo</strong> and select <strong>Install</strong>.</p>
+            </li>
+            <li>
+              <h3>Make yourself at home</h3>
+              <p>Open <strong>Silo</strong> in Kodi. Enter your Silo server’s URL, sign in with a code or your username and password, and choose your profile.</p>
+            </li>
+          </ol>
+        </section>
+        <section class="compatibility" aria-labelledby="compatibility-title">
+          <h2 id="compatibility-title">An early test build</h2>
+          <div>
+            <p>This build supports original-file HTTP direct play. Titles that need remuxing or transcoding may be refused. Playback compatibility still needs testing on your Kodi device.</p>
+            <p>HDR and Dolby Vision capabilities are configured manually. Select P7 FEL only on a device, firmware and Kodi build you have verified can play the full enhancement layer.</p>
+          </div>
+        </section>
+      </main>
+      <footer>
+        <p>Silo Theater · Silo for Kodi</p>
+        <a href="https://github.com/slimshizn/Silo-Theater/issues">Report an issue ↗</a>
+      </footer>
+    </div>
+  </body>
+</html>
