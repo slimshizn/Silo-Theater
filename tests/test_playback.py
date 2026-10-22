@@ -590,11 +590,11 @@ class ControllerTests(unittest.TestCase):
             def setProperty(self, key, value):
                 state.listitem_props[key] = value
 
-            def setMimeType(self, *args):
-                pass
+            def setMimeType(self, value):
+                state.listitem_props["<mime>"] = value
 
-            def setContentLookup(self, *args):
-                pass
+            def setContentLookup(self, value):
+                state.listitem_props["<content_lookup>"] = value
 
         windows = getattr(self, "platform_windows", False)
         xbmc = SimpleNamespace(Player=KodiPlayer, Monitor=Monitor,
@@ -848,6 +848,25 @@ class ControllerTests(unittest.TestCase):
         state = self.run_player(FakeClient(), [(1, None), (2, "stop")], start=0)
         self.assertEqual(state.listitem_props.get("no-ext-subs-scan"), "true")
         self.assertEqual(state.listitem_props.get("IsPlayable"), "true")
+
+    def test_other_platforms_keep_the_full_item_handoff(self):
+        decision = playable_decision()
+        decision["playback_plan"]["stream"]["mime_type"] = "video/x-matroska"
+        state = self.run_player(FakeClient(decision), [(1, None), (2, "stop")], start=0)
+        self.assertEqual(state.listitem_props.get("<mime>"), "video/x-matroska")
+        self.assertIs(state.listitem_props.get("<content_lookup>"), False)
+        self.assertEqual(state.listitem_props.get("IsPlayable"), "true")
+
+    def test_windows_hands_the_stream_over_bare(self):
+        decision = playable_decision()
+        decision["playback_plan"]["stream"]["mime_type"] = "video/x-matroska"
+        self.platform_windows = True
+        try:
+            state = self.run_player(FakeClient(decision), [(1, None), (2, "stop")], start=0)
+        finally:
+            del self.platform_windows
+        self.assertEqual(state.listitem_props, {})
+        self.assertTrue(any("bare_handoff_windows" in line for line in state.logs))
 
     def test_paused_playback_is_never_nudged(self):
         events = [(1, None), (2, None), (2, "pause")] + [(2, None)] * 40 + [(2, "resume"), (3, "stop")]
