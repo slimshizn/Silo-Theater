@@ -15,12 +15,12 @@ Silo Theater brings your Silo media library to **Kodi 21 or newer**, with a full
 
 1. Open **Settings → File manager → Add source** and enter `https://slimshizn.github.io/Silo-Theater/`. Name the source **Silo Theater**.
 2. Open **Add-ons → Install from zip file → Silo Theater**. Enable installation from unknown sources if prompted.
-3. Select **repository.silo.theater-1.0.0.zip**.
+3. Select **repository.silo.theater-1.0.1.zip**.
 4. Open **Install from repository → Silo Theater Repository**, find **Silo**, and select **Install**.
 
 Open **Silo** in Kodi, enter your Silo server's full HTTP or HTTPS URL, sign in and choose a profile. Server URLs with a reverse-proxy path prefix are supported.
 
-You can also [download the repository installer](https://slimshizn.github.io/Silo-Theater/repository.silo.theater-1.0.0.zip) in a browser and transfer it to your Kodi device.
+You can also [download the repository installer](https://slimshizn.github.io/Silo-Theater/repository.silo.theater-1.0.1.zip) in a browser and transfer it to your Kodi device.
 
 ## Build from source
 
@@ -32,11 +32,11 @@ make build
 make repository
 ```
 
-`make build` creates `dist/script.silo-0.1.0.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
+`make build` creates `dist/script.silo-0.1.1.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
-Version **0.1.0** supports **original HTTP direct play**. Titles that require remuxing or transcoding may be refused. Auto-next, a custom player overlay and automatic quality switching are not available.
+Version **0.1.1** supports **original HTTP direct play**. Titles that require remuxing or transcoding may be refused. Auto-next, a custom player overlay and automatic quality switching are not available.
 
 The default display setting declares SDR with a 1080p ceiling. Select HDR10 or Dolby Vision only for a compatible device and display; these settings allow a 2160p ceiling. Select **Dolby Vision P7 FEL** only when your hardware, firmware and Kodi build support full enhancement-layer decoding. Device capabilities are configured manually.
 

@@ -23,6 +23,7 @@ except ImportError:
 
 REPOSITORY_ID = "repository.silo.theater"
 PAGES_BASE = "https://slimshizn.github.io/Silo-Theater/"
+DOWNLOAD_BASE = "https://raw.githubusercontent.com/slimshizn/Silo-Theater/gh-pages/"
 
 
 def validate_repository(root: Path) -> ET.Element:
@@ -57,8 +58,8 @@ def validate_repository(root: Path) -> ET.Element:
     directory = directories[0]
     expected_urls = {"info": "addons.xml", "checksum": "addons.xml.md5", "datadir": "zips/"}
     for element, suffix in expected_urls.items():
-        if directory.findtext(element) != PAGES_BASE + suffix:
-            raise ValueError("The repository {} URL must point to {}{}".format(element, PAGES_BASE, suffix))
+        if directory.findtext(element) != DOWNLOAD_BASE + suffix:
+            raise ValueError("The repository {} URL must point to {}{}".format(element, DOWNLOAD_BASE, suffix))
     info = directory.find("info")
     checksum = directory.find("checksum")
     datadir = directory.find("datadir")

@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 import zipfile
 
 
@@ -23,6 +24,8 @@ class BuildTests(unittest.TestCase):
         self.root.mkdir()
         for name in ("addon.xml", "LICENSE"):
             shutil.copyfile(ROOT / name, self.root / name)
+        self.manifest = ET.parse(self.root / "addon.xml").getroot()
+        self.version = self.manifest.get("version")
         shutil.copytree(ROOT / "resources", self.root / "resources")
         (self.root / "default.py").write_text("print('Silo')\n", encoding="utf-8")
 
@@ -42,10 +45,11 @@ class BuildTests(unittest.TestCase):
             self.write(name)
         self.write("resources/lib/client.py", "VALUE = 1\n")
         archive_path = build.build_addon(self.root)
-        self.assertEqual(archive_path.name, "script.silo-0.1.0.zip")
+        self.assertEqual(archive_path.name, "script.silo-{}.zip".format(self.version))
         with zipfile.ZipFile(archive_path) as archive:
             names = archive.namelist()
             self.assertIn("script.silo/addon.xml", names)
+            self.assertEqual(ET.fromstring(archive.read("script.silo/addon.xml")).get("provider-name"), "slimshizn")
             self.assertIn("script.silo/default.py", names)
             self.assertIn("script.silo/LICENSE", names)
             self.assertIn("script.silo/resources/lib/client.py", names)

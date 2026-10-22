@@ -6,10 +6,13 @@ from pathlib import Path
 import re
 import unittest
 from urllib.parse import unquote, urljoin, urlsplit
+import xml.etree.ElementTree as ET
 
 
 BASE_URL = "https://slimshizn.github.io/Silo-Theater/"
-INSTALLER = "repository.silo.theater-1.0.0.zip"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY = ET.parse(PROJECT_ROOT / "repository/repository.silo.theater/addon.xml").getroot()
+INSTALLER = "{}-{}.zip".format(REPOSITORY.attrib["id"], REPOSITORY.attrib["version"])
 
 # Kodi 21 HTTPDirectory.cpp matches this pattern with case-insensitive DOTALL.
 # https://github.com/xbmc/xbmc/blob/Omega/xbmc/filesystem/HTTPDirectory.cpp
@@ -60,7 +63,7 @@ class SourcePageParser(HTMLParser):
 
 class SiteTests(unittest.TestCase):
     def setUp(self):
-        self.html = (Path(__file__).resolve().parents[1] / "site/index.html").read_text(encoding="utf-8")
+        self.html = (PROJECT_ROOT / "site/index.html").read_text(encoding="utf-8")
         self.page = SourcePageParser()
         self.page.feed(self.html)
 

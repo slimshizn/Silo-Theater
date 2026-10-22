@@ -59,7 +59,7 @@ def kodi_media_url(server_url, stream):
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.1.0"):
+    def __init__(self, client, mode="auto", version="0.1.1"):
         self.client, self.mode, self.version = client, mode, version
         self.installation_id = client.store.get("installation_id")
         if not self.installation_id:

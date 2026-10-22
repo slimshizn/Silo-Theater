@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 from scripts.build import production_files
-from scripts.build_repository import PAGES_BASE, REPOSITORY_ID, build_repository, validate_repository
+from scripts.build_repository import DOWNLOAD_BASE, REPOSITORY_ID, build_repository, validate_repository
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,9 +26,15 @@ class RepositoryTests(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, target)
         shutil.copytree(ROOT / "repository", self.root / "repository")
+        self.addon_manifest = ET.parse(self.root / "addon.xml").getroot()
+        self.repository_manifest = ET.parse(self.root / "repository" / REPOSITORY_ID / "addon.xml").getroot()
+        self.addon_version = self.addon_manifest.get("version")
+        self.repository_version = self.repository_manifest.get("version")
+        self.addon_filename = "script.silo-{}.zip".format(self.addon_version)
+        self.repository_filename = "{}-{}.zip".format(REPOSITORY_ID, self.repository_version)
         site = self.root / "site"
         site.mkdir()
-        (site / "index.html").write_text('<!doctype html><a href="repository.silo.theater-1.0.0.zip">Install</a>\n')
+        (site / "index.html").write_text('<!doctype html><a href="{}">Install</a>\n'.format(self.repository_filename))
         self.output = Path(self.temporary.name) / "pages"
 
     def test_catalog_contains_both_addons_and_matches_the_exact_md5(self):
@@ -37,7 +43,8 @@ class RepositoryTests(unittest.TestCase):
         catalog = ET.fromstring(contents)
         self.assertEqual(catalog.tag, "addons")
         self.assertEqual([(item.get("id"), item.get("version")) for item in catalog],
-                         [(REPOSITORY_ID, "1.0.0"), ("script.silo", "0.1.0")])
+                         [(REPOSITORY_ID, self.repository_version), ("script.silo", self.addon_version)])
+        self.assertTrue(all(item.get("provider-name") == "slimshizn" for item in catalog))
         expected = hashlib.md5(contents, usedforsecurity=False).hexdigest()
         self.assertEqual(paths["checksum"].read_text(), expected + "\n")
         for path in (paths["installer"], paths["addon_zip"], paths["repository_zip"]):
@@ -46,19 +53,20 @@ class RepositoryTests(unittest.TestCase):
 
     def test_installer_and_downloads_have_the_kodi_layout(self):
         paths = build_repository(self.root, self.output)
-        self.assertEqual(paths["installer"].name, "repository.silo.theater-1.0.0.zip")
+        self.assertEqual(paths["installer"].name, self.repository_filename)
         self.assertEqual(paths["repository_zip"].relative_to(self.output).as_posix(),
-                         "zips/repository.silo.theater/repository.silo.theater-1.0.0.zip")
+                         "zips/{}/{}".format(REPOSITORY_ID, self.repository_filename))
         self.assertEqual(paths["addon_zip"].relative_to(self.output).as_posix(),
-                         "zips/script.silo/script.silo-0.1.0.zip")
+                         "zips/script.silo/{}".format(self.addon_filename))
         self.assertEqual(paths["installer"].read_bytes(), paths["repository_zip"].read_bytes())
         with zipfile.ZipFile(paths["installer"]) as archive:
             self.assertEqual(archive.namelist(), [REPOSITORY_ID + "/LICENSE", REPOSITORY_ID + "/addon.xml"])
             self.assertEqual(archive.read(REPOSITORY_ID + "/LICENSE"), (self.root / "LICENSE").read_bytes())
             manifest = ET.fromstring(archive.read(REPOSITORY_ID + "/addon.xml"))
+            self.assertEqual(manifest.get("provider-name"), "slimshizn")
             directory = manifest.find("./extension[@point='xbmc.addon.repository']/dir")
             self.assertIsNotNone(directory)
-            self.assertEqual(directory.findtext("info"), PAGES_BASE + "addons.xml")
+            self.assertEqual(directory.findtext("info"), DOWNLOAD_BASE + "addons.xml")
             self.assertEqual(directory.find("checksum").get("verify"), "md5")
             self.assertEqual(directory.find("datadir").get("zip"), "true")
             self.assertEqual(directory.findtext("hashes"), "sha256")
@@ -93,12 +101,18 @@ class RepositoryTests(unittest.TestCase):
         first = build_repository(self.root, self.output)
         old_package = first["addon_zip"].read_bytes()
         manifest = self.root / "addon.xml"
-        manifest.write_text(manifest.read_text().replace('version="0.1.0"', 'version="0.1.1"'))
+        version_parts = [int(part) for part in self.addon_version.split(".")]
+        version_parts += [0] * max(0, 3 - len(version_parts))
+        version_parts[2] += 1
+        next_version = ".".join(str(part) for part in version_parts)
+        tree = ET.parse(manifest)
+        tree.getroot().set("version", next_version)
+        tree.write(manifest, encoding="utf-8", xml_declaration=True)
         next_release = build_repository(self.root, self.output)
-        self.assertEqual(next_release["addon_zip"].name, "script.silo-0.1.1.zip")
+        self.assertEqual(next_release["addon_zip"].name, "script.silo-{}.zip".format(next_version))
         self.assertEqual(first["addon_zip"].read_bytes(), old_package)
         catalog = ET.fromstring(next_release["index"].read_bytes())
-        self.assertEqual(catalog.find("addon[@id='script.silo']").get("version"), "0.1.1")
+        self.assertEqual(catalog.find("addon[@id='script.silo']").get("version"), next_version)
 
     def test_legacy_repository_definition_and_wrong_endpoints_are_rejected(self):
         path = self.root / "repository" / REPOSITORY_ID / "addon.xml"
@@ -106,7 +120,7 @@ class RepositoryTests(unittest.TestCase):
         path.write_text(original.replace("<dir>", "").replace("</dir>", ""))
         with self.assertRaisesRegex(ValueError, "modern <dir>"):
             validate_repository(self.root)
-        path.write_text(original.replace("https://slimshizn.github.io/Silo-Theater/zips/", "https://example.invalid/zips/"))
+        path.write_text(original.replace(DOWNLOAD_BASE + "zips/", "https://example.invalid/zips/"))
         with self.assertRaisesRegex(ValueError, "datadir URL"):
             validate_repository(self.root)
 
