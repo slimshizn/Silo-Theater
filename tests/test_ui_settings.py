@@ -46,8 +46,12 @@ class FakeWindow:
         self.closed = True
 
 
+XBMC = types.SimpleNamespace(Monitor=MagicMock, log=MagicMock(), LOGERROR=4,
+                             getInfoLabel=lambda label: {"System.BuildVersion": "21.1 Git:example",
+                                                         "System.OSVersionInfo": "Android 12"}.get(label, ""),
+                             getCondVisibility=lambda condition: condition == "System.Platform.Android")
 KODI_MODULES = {
-    "xbmc": types.SimpleNamespace(Monitor=MagicMock, log=MagicMock(), LOGERROR=4),
+    "xbmc": XBMC,
     "xbmcgui": types.SimpleNamespace(WindowXML=FakeWindow, Dialog=MagicMock, ListItem=MagicMock),
 }
 with patch.dict(sys.modules, KODI_MODULES):
@@ -64,13 +68,14 @@ class Action:
 
 
 LEFT, UP, DOWN, BACK = 1, 3, 4, 10
-PLAYBACK, AUDIO, DEVICE = 0, 1, 2
+PLAYBACK, AUDIO, DEVICE, ACCOUNT = 0, 1, 2, 3
 
 
 def full_profile(**extra):
     profile = {"id": 7, "name": "Example Profile", "auto_skip_intro": False, "auto_skip_credits": True,
                "auto_skip_recap": False, "quality_preference": "auto", "language": None,
-               "subtitle_language": "en", "subtitle_mode": "auto", "show_forced_subtitles": True}
+               "subtitle_language": "en", "subtitle_mode": "auto", "show_forced_subtitles": True,
+               "preferred_metadata_language": ""}
     profile.update(extra)
     return profile
 
@@ -94,6 +99,7 @@ def make_application(profile=None, fail=False, addon=None):
     application.profile = full_profile() if profile is None else profile
     application.profile_name = "Example Profile"
     application.addon = addon or FakeAddon()
+    application.store = {}
     application.dialog.select.return_value = -1
 
     def guard(callback):
@@ -146,17 +152,22 @@ def click(window, key):
 
 
 class LayoutTests(unittest.TestCase):
-    def test_opens_on_playback_with_profile_name_and_three_categories(self):
+    def test_opens_on_playback_with_profile_name_and_four_categories(self):
         window = open_window()
         self.assertEqual(window.properties["silo.subtitle"], "Settings for Example Profile")
         self.assertEqual([window.getControl(cid).setLabel.call_args[0][0] for cid in ui_settings.RAIL_BUTTONS],
-                         ["Playback", "Audio and subtitles", "This device"])
+                         ["Playback", "Audio and subtitles", "This device", "Account"])
         self.assertEqual(window.focus, ui_settings.RAIL)
         self.assertEqual(window.properties["silo.category"], "0")
-        labels = [window.getControl(button(index)).setLabel.call_args[0][0] for index in range(4)]
+        labels = [window.getControl(button(index)).setLabel.call_args[0][0] for index in range(8)]
         self.assertEqual(labels, ["Skip intros automatically", "Skip credits automatically",
-                                  "Skip recaps automatically", "Quality preference"])
-        self.assertEqual([value_label(window, index) for index in range(4)], ["Off", "On", "Off", "Automatic"])
+                                  "Skip recaps automatically", "Quality preference", "Rewind when resuming",
+                                  "Ask if you're still watching", "Show Up next",
+                                  "Maximum bitrate for converted video"])
+        self.assertEqual([value_label(window, index) for index in range(8)],
+                         ["Off", "On", "Off", "Automatic", "7 seconds", "After 3 episodes",
+                          "30 seconds before the end", "No limit"])
+        select_category(window, ACCOUNT)
         for index in range(4, ui_settings.SLOTS):
             window.getControl(ui_settings.slot_ids(index)[0]).setVisible.assert_called_with(False)
 
@@ -164,22 +175,25 @@ class LayoutTests(unittest.TestCase):
         window = open_window()
         select_category(window, AUDIO)
         self.assertEqual(window.category, AUDIO)
-        self.assertEqual([value_label(window, index) for index in range(4)],
-                         ["Default", "English", "Automatic", "On"])
+        self.assertEqual([value_label(window, index) for index in range(5)],
+                         ["Default", "English", "Automatic", "On", "Default"])
+        self.assertEqual(window.getControl(button(4)).setLabel.call_args[0][0], "Metadata language")
         select_category(window, DEVICE)
-        self.assertEqual(window.getControl(button(3)).setLabel.call_args[0][0], "More device settings…")
+        self.assertEqual(window.getControl(button(5)).setLabel.call_args[0][0], "More device settings…")
+        self.assertEqual([value_label(window, index) for index in (3, 4)],
+                         ["Only when no profile is saved", "Off"])
 
     def test_up_and_down_move_within_rows_and_the_hint_opens_under_the_focused_row(self):
         window = open_window()
         window.setFocusId(button(0))
         window.onFocus(button(0))
         window.getControl(ui_settings.HINT).setVisible.assert_called_with(False)
-        for _ in range(5):
+        for _ in range(3):
             window.onAction(Action(DOWN))
         self.assertEqual(window.focus, button(3))
         hint = window.getControl(ui_settings.HINT)
         hint.setVisible.assert_called_with(True)
-        self.assertIn("plays the original file", hint.setLabel.call_args[0][0])
+        self.assertIn("converts", hint.setLabel.call_args[0][0])
         hint.setPosition.assert_called_with(ui_settings.ROWS_LEFT + ui_settings.HINT_INDENT,
                                             ui_settings.ROWS_TOP + 3 * ui_settings.ROW_PITCH
                                             + ui_settings.ROW_HEIGHT + 4)
@@ -187,13 +201,15 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(window.focus, button(2))
         hint.setVisible.assert_called_with(False)
 
-    def test_temporary_session_shows_only_this_device(self):
+    def test_temporary_session_shows_only_device_settings_and_account_actions(self):
         window = open_window(make_application(profile={"id": 7}))
-        self.assertEqual(window.getControl(ui_settings.RAIL_BUTTONS[0]).setLabel.call_args[0][0], "This device")
-        for cid in ui_settings.RAIL_BUTTONS[1:]:
-            window.getControl(cid).setVisible.assert_called_with(False)
+        self.assertEqual([window.getControl(cid).setLabel.call_args[0][0] for cid in ui_settings.RAIL_BUTTONS[:3]],
+                         ["Playback", "This device", "Account"])
+        window.getControl(ui_settings.RAIL_BUTTONS[3]).setVisible.assert_called_with(False)
         self.assertEqual([item["key"] for item in window.rows()],
-                         ["auto_next", "skip_prompts", "player_menu_key", None])
+                         ["resume_rewind", "still_watching", "next_up_lead", "max_bitrate"])
+        select_category(window, 2)
+        self.assertEqual([item["key"] for item in window.rows()], ["diagnostics", "server", "logout"])
 
     def test_every_category_shows_its_rows_when_focused_or_clicked(self):
         window = open_window()
@@ -339,6 +355,216 @@ class DeviceSettingTests(unittest.TestCase):
         self.assertEqual(window.result, "device")
 
 
+class NewDeviceSettingTests(unittest.TestCase):
+    def test_device_choices_write_the_integer_and_choice_values(self):
+        cases = ((PLAYBACK, "resume_rewind", 0, "0", "Off"),
+                 (PLAYBACK, "still_watching", 3, "4", "After 4 episodes"),
+                 (PLAYBACK, "next_up_lead", 3, "60", "60 seconds before the end"),
+                 (PLAYBACK, "max_bitrate", 2, "8000", "8 Mbps"),
+                 (DEVICE, "profile_select", 3, "12h", "After 12 hours away"))
+        for category, key, choice, stored, label in cases:
+            with self.subTest(key=key):
+                addon = FakeAddon()
+                application = make_application(addon=addon)
+                application.dialog.select.return_value = choice
+                window = open_window(application)
+                select_category(window, category)
+                index = click(window, key)
+                self.assertEqual(addon.values[key], stored)
+                self.assertEqual(value_label(window, index), label)
+                application.update_profile.assert_not_called()
+
+    def test_device_choice_preselects_the_stored_value_and_ignores_cancel(self):
+        addon = FakeAddon({"max_bitrate": "20000"})
+        application = make_application(addon=addon)
+        window = open_window(application)
+        index = click(window, "max_bitrate")
+        options = application.dialog.select.call_args[0][1]
+        self.assertEqual(options, ["No limit", "4 Mbps", "8 Mbps", "12 Mbps", "20 Mbps", "40 Mbps"])
+        self.assertEqual(application.dialog.select.call_args[1]["preselect"], 4)
+        self.assertEqual(addon.values, {"max_bitrate": "20000"})
+        self.assertEqual(value_label(window, index), "20 Mbps")
+
+    def test_bitrate_choices_match_the_settings_module(self):
+        from resources.lib.silo.settings import INTEGER_CHOICES
+
+        for item in ui_settings.PLAYBACK[1]:
+            if item["kind"] == ui_settings.DEVICE_CHOICE:
+                self.assertEqual([code for code, _label in item["choices"]], list(INTEGER_CHOICES[item["key"]]))
+
+    def test_hide_spoilers_toggles_the_device_setting(self):
+        addon = FakeAddon()
+        window = open_window(make_application(addon=addon))
+        select_category(window, DEVICE)
+        index = click(window, "hide_spoilers")
+        self.assertEqual(addon.values["hide_spoilers"], "true")
+        self.assertEqual(value_label(window, index), "On")
+
+    def test_metadata_language_saves_on_the_profile_with_default_as_none(self):
+        application = make_application(profile=full_profile(preferred_metadata_language="de"))
+        application.dialog.select.return_value = 2
+        window = open_window(application)
+        select_category(window, AUDIO)
+        self.assertEqual(value_label(window, 4), "German")
+        index = click(window, "preferred_metadata_language")
+        application.update_profile.assert_called_once_with({"preferred_metadata_language": "es"})
+        self.assertEqual(value_label(window, index), "Spanish")
+        application.dialog.select.return_value = 0
+        click(window, "preferred_metadata_language")
+        application.update_profile.assert_called_with({"preferred_metadata_language": None})
+
+
+class AccountTests(unittest.TestCase):
+    def test_manage_profiles_opens_the_screen_and_refreshes_the_subtitle(self):
+        application = make_application()
+
+        def manage(name):
+            self.assertEqual(name, "manage_profiles")
+            application.profile_name = "Example Renamed"
+
+        application.open_screen.side_effect = manage
+        window = open_window(application)
+        select_category(window, ACCOUNT)
+        click(window, "manage_profiles")
+        self.assertFalse(window.closed)
+        self.assertEqual(window.properties["silo.subtitle"], "Settings for Example Renamed")
+
+    def test_switch_server_and_sign_out_confirm_then_return_their_result(self):
+        for key, result in (("server", "server"), ("logout", "logout")):
+            with self.subTest(key=key):
+                application = make_application()
+                application.dialog.yesno.return_value = False
+                window = open_window(application)
+                select_category(window, ACCOUNT)
+                click(window, key)
+                self.assertFalse(window.closed)
+                application.dialog.yesno.return_value = True
+                click(window, key)
+                self.assertTrue(window.closed)
+                self.assertEqual(window.result, result)
+
+    def test_open_settings_passes_account_results_through(self):
+        application = make_application()
+        application.dialog.yesno.return_value = True
+
+        def sign_out(window):
+            window.onInit()
+            select_category(window, ACCOUNT)
+            click(window, "logout")
+
+        with patch.object(ui_settings.SettingsWindow, "doModal", sign_out):
+            self.assertEqual(ui_settings.open_settings(application), "logout")
+
+
+class DiagnosticsTests(unittest.TestCase):
+    CAPABILITIES = {"state": "available", "server_instance_id": "example-instance", "consent_notice_version": 2,
+                    "max_bundle_bytes": 1048576}
+
+    def setUp(self):
+        # ui_settings imports xbmc when it collects versions, after the module stubs are gone.
+        patcher = patch.dict(sys.modules, {"xbmc": XBMC})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def make(self, addon_values=None):
+        addon = FakeAddon(dict({"server_url": "https://silo.example.invalid", "dv_mode": "dv"},
+                               **(addon_values or {})))
+        addon.getAddonInfo = lambda key: "0.5.0" if key == "version" else str(ROOT)
+        application = make_application(addon=addon)
+        application.store = {"access_token": "secret-access", "refresh_token": "secret-refresh"}
+        sent = {}
+
+        def request(method, path, body=None, **kwargs):
+            self.assertEqual((method, path), ("GET", "/diagnostics/capabilities"))
+            return dict(self.CAPABILITIES)
+
+        def upload(method, url, headers, data):
+            sent.update(method=method, url=url, headers=headers, data=data)
+            return 201, {}, {"report_id": "r-1", "short_id": "AB12CD"}
+
+        client = MagicMock()
+        client.request.side_effect = request
+        client.headers.return_value = {"Authorization": "Bearer secret-access"}
+        client._url.side_effect = lambda path: "https://silo.example.invalid/api/v2" + path
+        client.transport.upload.side_effect = upload
+        application.client = client
+        application.dialog.yesno.return_value = True
+        return application, sent
+
+    def test_report_is_confirmed_sent_and_its_id_shown(self):
+        application, sent = self.make()
+        self.assertEqual(ui_settings.send_diagnostics(application), "AB12CD")
+        self.assertIn("never contains passwords", application.dialog.yesno.call_args[0][1])
+        self.assertIn("AB12CD", application.dialog.ok.call_args[0][1])
+        self.assertEqual(sent["url"], "https://silo.example.invalid/api/v2/diagnostics/reports")
+        self.assertIn("multipart/form-data; boundary=", sent["headers"]["Content-Type"])
+        self.assertEqual(sent["headers"]["X-Profile-Id"], "7")
+
+    def test_report_holds_versions_and_settings_but_no_secrets(self):
+        import gzip
+        import io
+        import json
+        import tarfile
+
+        application, sent = self.make()
+        ui_settings.send_diagnostics(application)
+        body = sent["data"]
+        for secret in (b"secret-access", b"secret-refresh", b"silo.example.invalid", str(ROOT).encode()):
+            self.assertNotIn(secret, body)
+        boundary = sent["headers"]["Content-Type"].split("boundary=")[1].encode()
+        parts = [part for part in body.split(b"--" + boundary) if part.strip(b"-\r\n")]
+        manifest = json.loads(parts[0].split(b"\r\n\r\n", 1)[1].rstrip(b"\r\n"))
+        self.assertEqual(manifest["report"]["type"], "manual")
+        self.assertEqual(manifest["report"]["app_version"], "Silo Theater 0.5.0")
+        self.assertEqual(manifest["report"]["app_build"], "21.1")
+        self.assertEqual(manifest["report"]["os_version"], "Android 12")
+        self.assertEqual(manifest["destination"]["server_instance_id"], "example-instance")
+        self.assertEqual(manifest["consent"], {"mode": "manual", "notice_version": 2})
+        bundle = parts[1].split(b"\r\n\r\n", 1)[1][:-2]
+        self.assertEqual(manifest["archive"]["bytes"], len(bundle))
+        with tarfile.open(fileobj=io.BytesIO(gzip.decompress(bundle))) as archive:
+            names = archive.getnames()
+            embedded = json.loads(archive.extractfile("manifest.json").read())
+            logs = archive.extractfile("logs.jsonl").read().decode()
+        self.assertEqual(names, manifest["archive"]["entries"])
+        self.assertEqual(embedded, {key: value for key, value in manifest.items() if key != "archive"})
+        self.assertIn('\\"dv_mode\\": \\"dv\\"', logs)
+        self.assertNotIn("server_url", logs)
+
+    def test_declined_confirmation_sends_nothing(self):
+        application, sent = self.make()
+        application.dialog.yesno.return_value = False
+        self.assertIsNone(ui_settings.send_diagnostics(application))
+        self.assertEqual(sent, {})
+
+    def test_unavailable_server_or_platform_explains_and_sends_nothing(self):
+        application, sent = self.make()
+        self.CAPABILITIES = dict(DiagnosticsTests.CAPABILITIES, state="disabled")
+        self.assertIsNone(ui_settings.send_diagnostics(application))
+        self.assertIn("not accepting", application.dialog.ok.call_args[0][1])
+        del self.CAPABILITIES
+        with patch.object(XBMC, "getCondVisibility", lambda condition: False):
+            self.assertIsNone(ui_settings.send_diagnostics(application))
+        self.assertIn("cannot send one yet", application.dialog.ok.call_args[0][1])
+        application.dialog.yesno.assert_not_called()
+        self.assertEqual(sent, {})
+
+    def test_kid_profile_is_not_attributed(self):
+        application, sent = self.make()
+        application.profile = full_profile(is_child=True)
+        ui_settings.send_diagnostics(application)
+        self.assertNotIn("X-Profile-Id", sent["headers"])
+        self.assertNotIn(b'"profile_id"', sent["data"])
+
+    def test_settings_row_runs_diagnostics_through_guard(self):
+        application, sent = self.make()
+        window = open_window(application)
+        select_category(window, ACCOUNT)
+        click(window, "diagnostics")
+        self.assertEqual(sent["method"], "POST")
+        self.assertFalse(window.closed)
+
+
 class SkinTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -371,8 +597,15 @@ class SkinTests(unittest.TestCase):
             self.assertIn(str(control), ids)
 
     def test_every_category_fits_the_slots(self):
-        for _title, rows in (ui_settings.PLAYBACK, ui_settings.AUDIO_SUBTITLES, ui_settings.THIS_DEVICE):
+        for _title, rows in (ui_settings.PLAYBACK, ui_settings.AUDIO_SUBTITLES, ui_settings.THIS_DEVICE,
+                             ui_settings.ACCOUNT):
             self.assertLessEqual(len(rows), ui_settings.SLOTS)
+        self.assertEqual(len(ui_settings.RAIL_BUTTONS), 4)
+
+    def test_lowest_row_and_its_hint_stay_on_screen(self):
+        bottom = (ui_settings.ROWS_TOP + (ui_settings.SLOTS - 1) * ui_settings.ROW_PITCH
+                  + ui_settings.ROW_HEIGHT + ui_settings.HINT_SPACE)
+        self.assertLessEqual(bottom, 1080 - 40)
 
 
 if __name__ == "__main__":

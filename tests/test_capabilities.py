@@ -5,6 +5,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "resources/lib"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from silo.capabilities import playback_capabilities
 from playback_contract import assert_contract
@@ -23,8 +24,10 @@ class CapabilityTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 codecs, context = playback_capabilities(mode)
                 delivery = context["deliveries"]["original_http"]
-                self.assertEqual(set(context["deliveries"]), {"original_http"})
+                self.assertEqual(set(context["deliveries"]), {"original_http", "hls", "progressive"})
                 self.assertEqual(delivery["transformations"], [])
+                # Managed dynamic range is an original-file claim only.
+                self.assertEqual(context["deliveries"]["hls"]["validated_claims"], [])
                 if mode == "p7_fel":
                     self.assertIn(7, codecs["hdr_details"]["dolby_vision_profiles"])
                     self.assertIn(7, delivery["hdr_details"]["dolby_vision_profiles"])
@@ -88,6 +91,43 @@ class CapabilityTests(unittest.TestCase):
                 self.assertEqual(codecs["max_resolution"], resolution)
                 self.assertFalse(codecs["hdr"])
                 assert_contract(self, codecs, "ClientCodecCapabilitiesV3")
+
+    def test_hls_is_offered_for_converted_streams_and_progressive_is_declined(self):
+        for mode in ("auto", "hdr10", "dv", "p7_fel"):
+            with self.subTest(mode=mode):
+                codecs, context = playback_capabilities(mode)
+                hls = context["deliveries"]["hls"]
+                self.assertTrue(hls["enabled"] and hls["supported_on_device"])
+                # The planner matches the plan's stream container ("hls").
+                self.assertIn("hls", hls["containers"])
+                self.assertEqual(set(hls["video_codecs"]), {"h264", "hevc"})
+                self.assertIn("aac", hls["audio_decode_codecs"])
+                self.assertEqual(hls["audio_passthrough_codecs"], [])
+                self.assertEqual(hls["hdr_details"], codecs["hdr_details"])
+                # No bitmap sidecar support: the server burns those in instead.
+                self.assertFalse(hls["subtitles"]["embedded_bitmap"])
+                self.assertFalse(hls["subtitles"]["sidecar_bitmap"])
+                self.assertTrue(hls["subtitles"]["sidecar_text"])
+                progressive = context["deliveries"]["progressive"]
+                self.assertFalse(progressive["enabled"])
+                self.assertFalse(progressive["supported_on_device"])
+                self.assertTrue(progressive["failure_reason"])
+
+    def test_direct_play_declares_what_kodi_decodes(self):
+        codecs, context = playback_capabilities("auto")
+        original = context["deliveries"]["original_http"]
+        for codec in ("h264", "hevc", "av1", "vc1", "vp9", "mpeg2video"):
+            self.assertIn(codec, codecs["codecs_video"])
+            self.assertIn(codec, original["video_codecs"])
+        for codec in ("aac", "ac3", "eac3", "truehd", "dts", "flac", "opus"):
+            self.assertIn(codec, original["audio_decode_codecs"])
+        # Container names the Silo scanner reports.
+        for container in ("mkv", "mp4", "avi", "ts", "m2ts", "webm", "wmv", "ogg"):
+            self.assertIn(container, codecs["containers"])
+
+    def test_unknown_resolution_falls_back_per_hdr_mode(self):
+        self.assertEqual(playback_capabilities("auto", max_resolution="8k")[0]["max_resolution"], "1080p")
+        self.assertEqual(playback_capabilities("hdr10", max_resolution="auto")[0]["max_resolution"], "2160p")
 
 
 if __name__ == "__main__":

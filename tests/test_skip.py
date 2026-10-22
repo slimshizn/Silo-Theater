@@ -6,7 +6,8 @@ import unittest
 from unittest.mock import MagicMock
 
 from resources.lib.silo import keymap
-from resources.lib.silo.player_extras import MENU_REQUEST, PLAYING, PlaybackExtras, chapters_for
+from resources.lib.silo.player_extras import (MENU_REQUEST, PLAYING, PlaybackExtras, WatchStreak, chapters_for,
+                                             quality_options, route_label)
 from resources.lib.silo.skip import SkipTracker, segments, skip_target
 
 VERSION = {
@@ -66,8 +67,8 @@ class Overlay:
     def __init__(self):
         self.shown, self.choice, self.updates = None, None, []
 
-    def show(self, *args):
-        self.shown = args
+    def show(self, *args, **kwargs):
+        self.shown, self.kwargs = args, kwargs
 
     def hide(self):
         self.shown = None
@@ -201,6 +202,208 @@ class ExtrasTests(unittest.TestCase):
 
     def test_chapters_convert_to_player_time(self):
         self.assertAlmostEqual(chapters_for(VERSION, 8.8)[2]["start"], 64.2)
+
+
+class StillWatchingAndLeadTests(unittest.TestCase):
+    def extras(self, streak=None, item=EPISODE, plan=None, **options):
+        self.player, self.skip, self.next_card, self.home, self.menu = MagicMock(), Overlay(), Overlay(), Home(), Menu()
+        self.streak = streak if streak is not None else WatchStreak()
+        self.seeks = []
+        settings = {"auto_next": True, "skip_prompts": True}
+        settings.update(options)
+        return PlaybackExtras(
+            self.player, item, VERSION, plan or {"timeline": {"timeline_offset_seconds": 0}}, settings,
+            skip_button=self.skip, up_next=self.next_card, menu_factory=lambda: self.menu, home=self.home,
+            next_lookup=lambda current: {"content_id": "episode-2", "title": "Second", "season_number": 1,
+                                         "episode_number": 2},
+            image=lambda item, kind: "", versions=[VERSION], file_id="file-a", streak=self.streak,
+            seek=self.seeks.append, ai_enabled=lambda: True)
+
+    def reach_up_next(self, extras, now=0):
+        extras.tick(3080, total=3210, now=now)
+        extras.tick(3134, total=3210, now=now + 1)
+
+    def test_countdown_expiry_counts_an_unattended_episode(self):
+        extras = self.extras(still_watching=3)
+        self.reach_up_next(extras)
+        command = extras.tick(3140, total=3210, now=12)
+        self.assertEqual(command, {"stop": "next", "item": extras.next_item, "auto": True})
+        self.assertEqual(self.streak.count, 1)
+
+    def test_play_now_is_an_interaction_and_resets_the_count(self):
+        streak = WatchStreak()
+        streak.count = 2
+        extras = self.extras(streak, still_watching=3)
+        self.reach_up_next(extras)
+        self.next_card.choice = "play"
+        self.assertEqual(extras.tick(3135, total=3210, now=3)["auto"], False)
+        self.assertEqual(streak.count, 0)
+
+    def test_threshold_shows_still_watching_instead_of_a_countdown(self):
+        streak = WatchStreak()
+        streak.count = 3
+        extras = self.extras(streak, still_watching=3)
+        self.reach_up_next(extras)
+        self.assertEqual(self.next_card.kwargs, {"still": True})
+        self.assertIsNone(self.next_card.shown[1])  # no countdown
+        # Nobody answers: playback is never advanced by itself.
+        self.assertIsNone(extras.tick(3200, total=3210, now=100))
+        self.next_card.choice = "play"
+        command = extras.tick(3201, total=3210, now=101)
+        self.assertEqual((command["stop"], command["auto"]), ("next", False))
+        self.assertEqual(streak.count, 0)
+
+    def test_still_watching_stop_ends_playback(self):
+        streak = WatchStreak()
+        streak.count = 5
+        extras = self.extras(streak, still_watching=2)
+        self.reach_up_next(extras)
+        self.next_card.choice = "stop"
+        self.assertEqual(extras.tick(3140, total=3210, now=5), {"stop": "still_watching"})
+        self.assertEqual(streak.count, 0)
+
+    def test_zero_never_asks(self):
+        streak = WatchStreak()
+        streak.count = 50
+        extras = self.extras(streak, still_watching=0)
+        self.reach_up_next(extras)
+        self.assertEqual(self.next_card.kwargs, {})
+        self.assertEqual(self.next_card.shown[1], 10.0)
+
+    def test_menu_and_skip_button_reset_the_count(self):
+        streak = WatchStreak()
+        streak.count = 2
+        extras = self.extras(streak)
+        self.home[MENU_REQUEST] = "1"
+        extras.tick(100, now=0)
+        self.assertEqual(streak.count, 0)
+        streak.count = 2
+        extras.tick(330, now=1)
+        self.skip.choice = "dismiss"
+        extras.tick(331, now=2)
+        self.assertEqual(streak.count, 0)
+
+    def test_up_next_lead_replaces_the_fixed_thirty_seconds_without_credits(self):
+        version = {key: value for key, value in VERSION.items() if key != "credits"}
+        item = dict(EPISODE, versions=[version])
+        for lead, start in ((60, 3150), (15, 3195), (None, 3180)):
+            with self.subTest(lead=lead):
+                extras = self.extras(item=item, **({"next_up_lead": lead} if lead else {}))
+                extras.version = version
+                extras.tick(start - 61, total=3210, now=0)  # lookup
+                extras.tick(start - 61, total=3210, now=0)
+                extras.tick(start - 0.5, total=3210, now=1)
+                self.assertIsNone(self.next_card.shown)
+                extras.tick(start, total=3210, now=2)
+                self.assertIsNotNone(self.next_card.shown)
+
+    def test_credits_marker_still_wins_over_the_lead(self):
+        extras = self.extras(next_up_lead=60)
+        extras.tick(3080, total=3210, now=0)
+        extras.tick(3130, total=3210, now=1)
+        self.assertIsNone(self.next_card.shown)
+        extras.tick(3134, total=3210, now=2)
+        self.assertIsNotNone(self.next_card.shown)
+
+
+class ConvertedMenuTests(unittest.TestCase):
+    PLAN = {
+        "delivery": "server_transcode_hls", "plan_id": "plan:x", "plan_attempt_key": "v3:x",
+        "timeline": {"timeline_offset_seconds": 0},
+        "effective_recipe": {"video_codec": "h264", "height": 1080, "bitrate_kbps": 6000},
+        "selected_tracks": {"audio": {"index": 1}},
+        "available_qualities": [{"label": "original", "display_name": "Original", "preserves_source": True},
+                                {"label": "1080p-medium", "display_name": "1080p Medium"}],
+        "subtitle": {"mode": "render", "track_id": "file:42:subtitle:0",
+                     "inventory": [{"track_id": "file:42:subtitle:0", "sync_key": "external-abc", "url": "/s.vtt"}]},
+    }
+    TRACKS = [{"language": "eng", "codec": "truehd", "channels": 8}, {"title": "Commentary", "codec": "aac",
+                                                                      "channels": 2}]
+
+    def extras(self, plan=None, **options):
+        self.player, self.home, self.menu = MagicMock(), Home(), Menu()
+        self.seeks = []
+        version = dict(VERSION, audio_tracks=self.TRACKS)
+        return PlaybackExtras(self.player, EPISODE, version, plan or self.PLAN, dict(options),
+                              skip_button=Overlay(), up_next=Overlay(), menu_factory=lambda: self.menu,
+                              home=self.home, versions=[version], file_id="42", seek=self.seeks.append,
+                              ai_enabled=lambda: True)
+
+    def open_menu(self, extras):
+        self.home[MENU_REQUEST] = "1"
+        extras.tick(100, now=0)
+        return self.menu.context
+
+    def test_context_describes_the_converted_route_and_choices(self):
+        context = self.open_menu(self.extras(quality_preference="1080p-medium"))
+        self.assertEqual(context["route"], "Transcode · 1080p H.264 · 6 Mbps")
+        self.assertTrue(context["converted"])
+        self.assertEqual(context["audio_index"], 1)
+        self.assertEqual([track["label"] for track in context["audio_tracks"]],
+                         ["ENG · TRUEHD · 7.1", "Commentary · AAC · Stereo"])
+        self.assertEqual(context["qualities"], [{"value": "original", "label": "Original"},
+                                                {"value": "1080p-medium", "label": "1080p Medium"}])
+        self.assertEqual(context["quality"], "1080p-medium")
+        self.assertTrue(context["ai_translate"])
+        self.assertTrue(context["subtitle_sync"])
+
+    def test_direct_play_and_single_rung_offer_no_quality_choice(self):
+        plan = dict(self.PLAN, delivery="original_http", available_qualities=[{"label": "original"}])
+        context = self.open_menu(self.extras(plan))
+        self.assertEqual(context["qualities"], [])
+        self.assertFalse(context["converted"])
+        self.assertEqual(context["route"], "Direct play · original file")
+        self.assertEqual(route_label({"delivery": "server_remux_hls"}), "Direct stream · remuxed by the server")
+        self.assertEqual(quality_options({}), [])
+
+    def test_quality_audio_and_tool_intents_become_controller_commands(self):
+        extras = self.extras()
+        self.open_menu(extras)
+        self.menu.intents = [{"action": "quality", "value": "1080p-medium"}]
+        self.assertEqual(extras.tick(101, now=1), {"replan": "quality", "quality": "1080p-medium"})
+        self.menu.intents = [{"action": "quality", "value": "1080p-medium"}]
+        self.assertIsNone(extras.tick(102, now=2))  # already the current choice
+        self.menu.intents = [{"action": "audio_track", "index": 0}]
+        self.assertEqual(extras.tick(103, now=3), {"replan": "track", "audio_index": 0})
+        self.menu.intents = [{"action": "audio_track", "index": True}, {"action": "audio_track", "index": -1}]
+        self.assertIsNone(extras.tick(104, now=4))
+        self.menu.intents = [{"action": "subtitle_tool", "screen": "subtitle_sync"}]
+        command = extras.tick(105, now=5)
+        self.assertEqual(command["screen"], "subtitle_sync")
+        self.assertEqual(command["subtitle"]["sync_key"], "external-abc")
+        self.menu.intents = [{"action": "subtitle_tool", "screen": "subtitle_search"}]
+        self.assertEqual(extras.tick(106, now=6), {"screen": "subtitle_search"})
+        self.menu.intents = [{"action": "subtitle_tool", "screen": "elsewhere"}]
+        self.assertIsNone(extras.tick(107, now=7))
+
+    def test_ai_status_is_asked_once_and_failures_hide_the_row(self):
+        calls = []
+
+        def broken():
+            calls.append(1)
+            raise OSError("offline")
+
+        extras = self.extras()
+        extras.ai_enabled = broken
+        self.assertFalse(self.open_menu(extras)["ai_translate"])
+        self.menu.open_state = False
+        self.assertFalse(self.open_menu(extras)["ai_translate"])
+        self.assertEqual(len(calls), 1)
+
+    def test_skip_seeks_go_through_the_injected_seek(self):
+        extras = self.extras(plan=dict(self.PLAN, subtitle={}))
+        extras.tick(330, now=0)
+        extras.skip_button.choice = "skip"
+        extras.tick(331, now=1)
+        self.assertEqual(self.seeks, [401.6])
+        self.player.seekTime.assert_not_called()
+
+    def test_update_plan_moves_markers_to_the_new_timeline(self):
+        extras = self.extras()
+        extras.update_plan(dict(self.PLAN, timeline={"timeline_offset_seconds": 300}), "720p-low")
+        self.assertEqual(extras.quality, "720p-low")
+        intro = next(span for span in extras.tracker.spans if span["kind"] == "intro")
+        self.assertAlmostEqual(intro["start"], 27.3)
 
 
 class KeymapTests(unittest.TestCase):

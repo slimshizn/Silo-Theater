@@ -106,3 +106,35 @@ class SessionStore:
         with self._lock:
             self._write({})
             self._data = {}
+
+
+def session_path(folder, server_url, adopt_legacy=True):
+    """Where a server's sign-in is saved: one file per server.
+
+    Earlier versions kept a single ``session.json``; it belongs to the server
+    named inside it. With ``adopt_legacy`` that file is renamed for its server;
+    without it (for example from the widget process) it is only read in place.
+    """
+    import hashlib
+
+    legacy = os.path.join(folder, "session.json")
+    if not server_url:
+        return legacy
+    path = os.path.join(folder, "session-{}.json".format(
+        hashlib.sha256(server_url.rstrip("/").encode("utf-8")).hexdigest()[:16]))
+    if os.path.exists(path) or not os.path.exists(legacy):
+        return path
+    try:
+        with open(legacy, encoding="utf-8") as handle:
+            owner = str(json.load(handle).get("server_url") or "")
+    except (OSError, ValueError, AttributeError):
+        return path
+    if owner.rstrip("/") != server_url.rstrip("/"):
+        return path
+    if not adopt_legacy:
+        return legacy
+    try:
+        os.replace(legacy, path)
+    except OSError:
+        return legacy
+    return path

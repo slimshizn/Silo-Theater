@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Silo settings. resources/lib/silo/ui_settings.py fills the rows and moves them so the
+<!-- Silo settings: four category buttons (101-104) and eight row slots (1000-1070).
+     resources/lib/silo/ui_settings.py fills the rows and moves them so the
      focused row's hint sits directly under it. -->
 <window>
   <defaultcontrol always="true">101</defaultcontrol>
@@ -142,8 +143,35 @@
       <texturefocus border="16" colordiffuse="FFEDEDED">round16.png</texturefocus>
       <texturenofocus border="16" colordiffuse="00FFFFFF">round16.png</texturenofocus>
       <onup>102</onup>
-      <ondown>103</ondown>
+      <ondown>104</ondown>
       <onleft>103</onleft>
+      <onright>1001</onright>
+    </control>
+    <control type="image" id="114">
+      <left>88</left>
+      <top>564</top>
+      <width>490</width>
+      <height>76</height>
+      <texture border="16" colordiffuse="24FFFFFF">round16.png</texture>
+      <visible>String.IsEqual(Window.Property(silo.category),3) + !Control.HasFocus(104)</visible>
+    </control>
+    <control type="button" id="104">
+      <left>88</left>
+      <top>564</top>
+      <width>490</width>
+      <height>76</height>
+      <label/>
+      <font>font27</font>
+      <textcolor>BFEDEDED</textcolor>
+      <focusedcolor>FF000000</focusedcolor>
+      <align>left</align>
+      <aligny>center</aligny>
+      <textoffsetx>24</textoffsetx>
+      <texturefocus border="16" colordiffuse="FFEDEDED">round16.png</texturefocus>
+      <texturenofocus border="16" colordiffuse="00FFFFFF">round16.png</texturenofocus>
+      <onup>103</onup>
+      <ondown>104</ondown>
+      <onleft>104</onleft>
       <onright>1001</onright>
     </control>
     <!-- Setting rows: slot k is group 1000+10k, button +1, value +2, value on focus +3.
@@ -440,6 +468,104 @@
         <aligny>center</aligny>
         <label/>
         <visible>Control.HasFocus(1051)</visible>
+      </control>
+    </control>
+    <control type="group" id="1060">
+      <left>630</left>
+      <top>816</top>
+      <width>1080</width>
+      <height>76</height>
+      <control type="button" id="1061">
+        <left>0</left>
+        <top>0</top>
+        <width>1080</width>
+        <height>76</height>
+        <label/>
+        <font>font27</font>
+        <textcolor>FFEDEDED</textcolor>
+        <focusedcolor>FF000000</focusedcolor>
+        <align>left</align>
+        <aligny>center</aligny>
+        <textoffsetx>24</textoffsetx>
+        <texturefocus border="16" colordiffuse="FFEDEDED">round16.png</texturefocus>
+        <texturenofocus border="16" colordiffuse="00FFFFFF">round16.png</texturenofocus>
+        <onup>1061</onup>
+        <ondown>1061</ondown>
+        <onleft>1061</onleft>
+        <onright>1061</onright>
+      </control>
+      <control type="label" id="1062">
+        <left>480</left>
+        <top>0</top>
+        <width>576</width>
+        <height>76</height>
+        <font>font27</font>
+        <textcolor>BFEDEDED</textcolor>
+        <align>right</align>
+        <aligny>center</aligny>
+        <label/>
+        <visible>!Control.HasFocus(1061)</visible>
+      </control>
+      <control type="label" id="1063">
+        <left>480</left>
+        <top>0</top>
+        <width>576</width>
+        <height>76</height>
+        <font>font27</font>
+        <textcolor>B3000000</textcolor>
+        <align>right</align>
+        <aligny>center</aligny>
+        <label/>
+        <visible>Control.HasFocus(1061)</visible>
+      </control>
+    </control>
+    <control type="group" id="1070">
+      <left>630</left>
+      <top>900</top>
+      <width>1080</width>
+      <height>76</height>
+      <control type="button" id="1071">
+        <left>0</left>
+        <top>0</top>
+        <width>1080</width>
+        <height>76</height>
+        <label/>
+        <font>font27</font>
+        <textcolor>FFEDEDED</textcolor>
+        <focusedcolor>FF000000</focusedcolor>
+        <align>left</align>
+        <aligny>center</aligny>
+        <textoffsetx>24</textoffsetx>
+        <texturefocus border="16" colordiffuse="FFEDEDED">round16.png</texturefocus>
+        <texturenofocus border="16" colordiffuse="00FFFFFF">round16.png</texturenofocus>
+        <onup>1071</onup>
+        <ondown>1071</ondown>
+        <onleft>1071</onleft>
+        <onright>1071</onright>
+      </control>
+      <control type="label" id="1072">
+        <left>480</left>
+        <top>0</top>
+        <width>576</width>
+        <height>76</height>
+        <font>font27</font>
+        <textcolor>BFEDEDED</textcolor>
+        <align>right</align>
+        <aligny>center</aligny>
+        <label/>
+        <visible>!Control.HasFocus(1071)</visible>
+      </control>
+      <control type="label" id="1073">
+        <left>480</left>
+        <top>0</top>
+        <width>576</width>
+        <height>76</height>
+        <font>font27</font>
+        <textcolor>B3000000</textcolor>
+        <align>right</align>
+        <aligny>center</aligny>
+        <label/>
+        <visible>Control.HasFocus(1071)</visible>
       </control>
     </control>
     <!-- Hint for the focused row; Python places it under that row and sets the text. -->

@@ -1,20 +1,24 @@
-"""The Silo settings screen: profile playback preferences and this device's player options."""
+"""The Silo settings screen: profile preferences, this device's player options and the account."""
 
 import xbmcgui
 
-from .settings import DEFAULTS
+from . import svc_profiles as svc
+from .api import ApiError
+from .settings import DEFAULTS, INTEGER_CHOICES, read_options
 from .ui_common import ACTION_DOWN, ACTION_LEFT, ACTION_UP, BACK_ACTIONS, set_properties
 
 # Control ids in SiloSettings.xml. Categories are buttons (not a list) so Kodi reports
 # every move between them through onFocus. Row slot k: group SLOT_BASE + 10k, button +1,
 # value +2, value shown while the row has focus +3.
-RAIL_BUTTONS, RAIL_FILLS, HINT = (101, 102, 103), (111, 112, 113), 400
+RAIL_BUTTONS, RAIL_FILLS, HINT = (101, 102, 103, 104), (111, 112, 113, 114), 400
 RAIL = RAIL_BUTTONS[0]
-SLOTS, SLOT_BASE = 6, 1000
+SLOTS, SLOT_BASE = 8, 1000
 ROWS_LEFT, ROWS_TOP, ROW_PITCH, ROW_HEIGHT = 630, 312, 84, 76
 HINT_INDENT, HINT_SPACE = 24, 44
 
-TOGGLE, CHOICE, DEVICE, MORE = "toggle", "choice", "device", "more"
+# Row kinds: profile preferences (TOGGLE, CHOICE) are saved on the server; device
+# settings (DEVICE, DEVICE_CHOICE) with addon.setSetting; ACTION rows run an account action.
+TOGGLE, CHOICE, DEVICE, DEVICE_CHOICE, MORE, ACTION = "toggle", "choice", "device", "device_choice", "more", "action"
 
 QUALITIES = (("auto", "Automatic"), ("original", "Original"), ("2160p", "4K (2160p)"),
              ("1080p", "1080p"), ("720p", "720p"))
@@ -28,6 +32,18 @@ LANGUAGES = ((None, "Default"), ("en", "English"), ("es", "Spanish"), ("fr", "Fr
              ("vi", "Vietnamese"), ("id", "Indonesian"), ("uk", "Ukrainian"), ("ro", "Romanian"))
 
 
+# Device choices: (value, label); values are settings.INTEGER_CHOICES / CHOICES members.
+REWIND_CHOICES = tuple((value, "Off" if value == 0 else "{} seconds".format(value))
+                       for value in INTEGER_CHOICES["resume_rewind"])
+STILL_WATCHING_CHOICES = tuple((value, "Never" if value == 0 else "After {} episodes".format(value))
+                               for value in INTEGER_CHOICES["still_watching"])
+NEXT_UP_CHOICES = tuple((value, "{} seconds before the end".format(value)) for value in INTEGER_CHOICES["next_up_lead"])
+BITRATE_CHOICES = tuple((value, "No limit" if value == 0 else "{:g} Mbps".format(value / 1000.0))
+                        for value in INTEGER_CHOICES["max_bitrate"])
+PROFILE_SELECT_CHOICES = (("auto", "Only when no profile is saved"), ("always", "Every time Silo opens"),
+                          ("1h", "After 1 hour away"), ("12h", "After 12 hours away"))
+
+
 def row(kind, label, key=None, choices=None, default=None, hint=""):
     return {"kind": kind, "label": label, "key": key, "choices": choices, "default": default, "hint": hint}
 
@@ -37,13 +53,23 @@ PLAYBACK = ("Playback", (
     row(TOGGLE, "Skip credits automatically", "auto_skip_credits"),
     row(TOGGLE, "Skip recaps automatically", "auto_skip_recap"),
     row(CHOICE, "Quality preference", "quality_preference", QUALITIES, "auto",
-        "Used by Silo apps that can convert video. Silo Theater plays the original file."),
+        "The quality Silo converts to when this device cannot play the original file."),
+    row(DEVICE_CHOICE, "Rewind when resuming", "resume_rewind", REWIND_CHOICES,
+        hint="Goes back a few seconds when you continue watching."),
+    row(DEVICE_CHOICE, "Ask if you're still watching", "still_watching", STILL_WATCHING_CHOICES,
+        hint="Pauses autoplay after this many episodes in a row without a key press."),
+    row(DEVICE_CHOICE, "Show Up next", "next_up_lead", NEXT_UP_CHOICES,
+        hint="Used when an episode has no credits marker."),
+    row(DEVICE_CHOICE, "Maximum bitrate for converted video", "max_bitrate", BITRATE_CHOICES,
+        hint="Limits video that Silo converts. Original files play as they are."),
 ))
 AUDIO_SUBTITLES = ("Audio and subtitles", (
     row(CHOICE, "Audio language", "language", LANGUAGES),
     row(CHOICE, "Subtitle language", "subtitle_language", LANGUAGES),
     row(CHOICE, "Subtitle mode", "subtitle_mode", SUBTITLE_MODES, "auto"),
     row(TOGGLE, "Show forced subtitles", "show_forced_subtitles"),
+    row(CHOICE, "Metadata language", "preferred_metadata_language", LANGUAGES,
+        hint="Language for titles and descriptions. Default uses each library's language."),
 ))
 THIS_DEVICE = ("This device", (
     row(DEVICE, "Play next episode automatically", "auto_next"),
@@ -51,9 +77,24 @@ THIS_DEVICE = ("This device", (
         hint="Offers Skip intro, Skip recap and Skip credits during playback."),
     row(DEVICE, "Silo player menu on the Menu key", "player_menu_key",
         hint="The Menu key (C on a keyboard) opens the Silo player menu during playback."),
+    row(DEVICE_CHOICE, "Ask who's watching", "profile_select", PROFILE_SELECT_CHOICES,
+        hint="When Silo shows the profile picker on this device."),
+    row(DEVICE, "Hide spoilers", "hide_spoilers",
+        hint="Hides descriptions and images of episodes you have not watched."),
     row(MORE, "More device settings…", hint="Display, HDR and Dolby Vision, resume and browsing."),
 ))
-PROFILE_FIELDS = frozenset(item["key"] for _title, rows in (PLAYBACK, AUDIO_SUBTITLES) for item in rows)
+ACCOUNT = ("Account", (
+    row(ACTION, "Manage profiles", "manage_profiles", hint="Add, change or delete the profiles on this account."),
+    row(ACTION, "Send diagnostics report", "diagnostics",
+        hint="Sends this device's versions and Silo Theater settings to the server's administrator."),
+    row(ACTION, "Switch server", "server", hint="Signs out and connects to another Silo server."),
+    row(ACTION, "Sign out", "logout"),
+))
+PROFILE_KINDS = (TOGGLE, CHOICE)
+PROFILE_FIELDS = frozenset(item["key"] for _title, rows in (PLAYBACK, AUDIO_SUBTITLES) for item in rows
+                           if item["kind"] in PROFILE_KINDS)
+# Account actions that need a full profile (not a temporary session).
+PROFILE_ACTIONS = frozenset({"manage_profiles"})
 
 
 def slot_ids(index):
@@ -62,11 +103,21 @@ def slot_ids(index):
 
 
 def categories(profile):
-    """A temporary session has no profile preferences, so only this device's settings show."""
+    """Categories with the rows this sign-in can use.
+
+    A temporary session has no profile preferences and cannot manage profiles,
+    so only device settings and the other account actions show.
+    """
     profile = profile if isinstance(profile, dict) else {}
-    if any(field in profile for field in PROFILE_FIELDS):
-        return [PLAYBACK, AUDIO_SUBTITLES, THIS_DEVICE]
-    return [THIS_DEVICE]
+    full = any(field in profile for field in PROFILE_FIELDS)
+    result = []
+    for title, rows in (PLAYBACK, AUDIO_SUBTITLES, THIS_DEVICE, ACCOUNT):
+        if not full:
+            rows = tuple(item for item in rows if item["kind"] not in PROFILE_KINDS
+                         and item["key"] not in PROFILE_ACTIONS)
+        if rows:
+            result.append((title, rows))
+    return result
 
 
 def normalized(value):
@@ -84,7 +135,7 @@ def choice_index(item, value):
 
 
 class SettingsWindow(xbmcgui.WindowXML):
-    """Silo's settings window; ``result`` is "device" (open the add-on settings) or None."""
+    """Silo's settings window; ``result`` is "device", "server", "logout" or None (see open_settings)."""
 
     def __init__(self, *args, **kwargs):
         self.application = None
@@ -101,8 +152,7 @@ class SettingsWindow(xbmcgui.WindowXML):
         self.initialized = True
         application = self.application
         self.categories = categories(getattr(application, "profile", None))
-        name = str(getattr(application, "profile_name", "") or "")
-        set_properties(self, {"silo.subtitle": "Settings for " + name if name else "Settings for this device"})
+        self.show_subtitle()
         for index, (button, fill) in enumerate(zip(RAIL_BUTTONS, RAIL_FILLS)):
             shown = index < len(self.categories)
             if shown:
@@ -111,6 +161,10 @@ class SettingsWindow(xbmcgui.WindowXML):
             self.getControl(fill).setVisible(shown)
         self.show_category(0)
         self.setFocusId(RAIL)
+
+    def show_subtitle(self):
+        name = str(getattr(self.application, "profile_name", "") or "")
+        set_properties(self, {"silo.subtitle": "Settings for " + name if name else "Settings for this device"})
 
     def focus_id(self):
         try:
@@ -133,6 +187,9 @@ class SettingsWindow(xbmcgui.WindowXML):
             return value == "true"
         return bool(DEFAULTS.get(key, False))
 
+    def device_value(self, key):
+        return read_options(self.application.addon).get(key, DEFAULTS.get(key))
+
     def value_text(self, item):
         kind = item["kind"]
         if kind == TOGGLE:
@@ -145,6 +202,9 @@ class SettingsWindow(xbmcgui.WindowXML):
             if index >= 0:
                 return item["choices"][index][1]
             return str(value)
+        if kind == DEVICE_CHOICE:
+            value = self.device_value(item["key"])
+            return next((label for code, label in item["choices"] if code == value), str(value))
         return ""
 
     # ------------------------------------------------------------ layout
@@ -249,6 +309,9 @@ class SettingsWindow(xbmcgui.WindowXML):
             self.result = "device"
             self.close()
             return
+        if kind == ACTION:
+            self.run_action(item["key"])
+            return
         if kind == TOGGLE:
             self.save(item["key"], self.profile().get(item["key"]) is not True)
         elif kind == CHOICE:
@@ -260,7 +323,37 @@ class SettingsWindow(xbmcgui.WindowXML):
             self.save(item["key"], item["choices"][choice][0])
         elif kind == DEVICE:
             self.toggle_device(item["key"])
+        elif kind == DEVICE_CHOICE:
+            self.choose_device(item)
         self.render_rows()
+
+    def choose_device(self, item):
+        values = [code for code, _label in item["choices"]]
+        current = self.device_value(item["key"])
+        preselect = values.index(current) if current in values else -1
+        choice = self.application.dialog.select(item["label"], [label for _code, label in item["choices"]],
+                                                preselect=preselect)
+        if 0 <= choice < len(values) and choice != preselect:
+            self.application.addon.setSetting(item["key"], str(values[choice]))
+
+    def run_action(self, key):
+        application = self.application
+        dialog = application.dialog
+        if key == "manage_profiles":
+            application.guard(lambda: application.open_screen("manage_profiles"))
+            # The active profile's name or preferences may have changed.
+            self.show_subtitle()
+            self.render_rows()
+        elif key == "diagnostics":
+            application.guard(lambda: send_diagnostics(application))
+        elif key == "server":
+            if dialog.yesno("Switch server", "Sign out of this Silo server and connect to another one?"):
+                self.result = "server"
+                self.close()
+        elif key == "logout":
+            if dialog.yesno("Sign out", "Sign out of Silo on this device?"):
+                self.result = "logout"
+                self.close()
 
     def save(self, field, value):
         """Save one profile preference; on failure guard shows the error and the old value stays."""
@@ -276,8 +369,70 @@ class SettingsWindow(xbmcgui.WindowXML):
                 application.guard(sync_keymap)
 
 
+def diagnostics_info(application):
+    """Versions, platform and this device's settings; never tokens, addresses or paths."""
+    info = {"app_version": str(application.addon.getAddonInfo("version") or ""), "kodi_version": "",
+            "os": "", "android": False, "model": "Kodi"}
+    try:
+        import xbmc
+
+        info["kodi_version"] = str(xbmc.getInfoLabel("System.BuildVersion") or "").split(" ")[0]
+        info["os"] = str(xbmc.getInfoLabel("System.OSVersionInfo") or "")
+        info["android"] = bool(xbmc.getCondVisibility("System.Platform.Android"))
+    except (ImportError, AttributeError, RuntimeError):
+        pass
+    state = svc.safe_state(read_options(application.addon))
+    profile = getattr(application, "profile", None) or {}
+    temporary = bool(getattr(application, "store", None) and application.store.get("temporary_session"))
+    state["profile_type"] = "kid" if profile.get("is_child") else "standard"
+    state["temporary_session"] = temporary
+    info["state"] = state
+    # Attribution is optional and the server refuses it for kid profiles.
+    if profile.get("id") is not None and not profile.get("is_child") and not temporary:
+        info["profile_id"] = str(profile["id"])
+    return info
+
+
+DIAGNOSTICS_NOTICE = ("Send a report to the administrator of this Silo server? It contains the Silo Theater "
+                      "and Kodi versions, the operating system and this device's Silo Theater settings. It never "
+                      "contains passwords, sign-in tokens, server addresses or file paths.")
+
+
+def send_diagnostics(application):
+    """Confirm, then upload a manual diagnostics report and show its id."""
+    dialog = application.dialog
+    heading = "Diagnostics report"
+    try:
+        capabilities = svc.diagnostics_capabilities(application.client)
+    except ApiError as exc:
+        if exc.status in (404, 405, 501):
+            dialog.ok(heading, "This Silo server does not accept diagnostics reports.")
+            return None
+        raise
+    if capabilities.get("state") != "available":
+        dialog.ok(heading, "This Silo server is not accepting diagnostics reports right now.")
+        return None
+    info = diagnostics_info(application)
+    if not info["android"]:
+        dialog.ok(heading, "Silo servers accept diagnostics reports from Android and Apple devices. Kodi on this "
+                           "system cannot send one yet.")
+        return None
+    if not dialog.yesno(heading, DIAGNOSTICS_NOTICE):
+        return None
+    manifest, bundle = svc.build_report(capabilities, info)
+    receipt = svc.send_report(application.client, manifest, bundle, info.get("profile_id"))
+    report = receipt.get("short_id") or receipt.get("report_id") or ""
+    dialog.ok(heading, "Report sent. Report ID: {}. Give this ID to your server's administrator.".format(report)
+              if report else "Report sent.")
+    return report
+
+
 def open_settings(application):
-    """Show the settings screen; returns "device" to open the add-on settings, else None."""
+    """Show the settings screen and return what the app loop should do next.
+
+    "device": open the add-on's own settings dialog; "server": sign out and
+    choose another server; "logout": sign out; None: back to Home.
+    """
     window = SettingsWindow("SiloSettings.xml", application.addon.getAddonInfo("path"), "Default", "1080i")
     window.application = application
     window.doModal()

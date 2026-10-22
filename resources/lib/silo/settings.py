@@ -21,9 +21,15 @@ DEFAULTS = {
     "auto_next": True,
     "skip_prompts": True,
     "player_menu_key": True,
+    "hide_spoilers": False,
+    "profile_select": "auto",
+    "resume_rewind": 7,
+    "still_watching": 3,
+    "next_up_lead": 30,
+    "max_bitrate": 0,
 }
 
-BOOLEANS = ("show_plot", "auto_next", "skip_prompts", "player_menu_key")
+BOOLEANS = ("show_plot", "auto_next", "skip_prompts", "player_menu_key", "hide_spoilers")
 
 CHOICES = {
     "sign_in_method": ("code", "password"),
@@ -32,9 +38,18 @@ CHOICES = {
     "dv_mode": ("auto", "hdr10", "dv", "p7_fel"),
     "max_resolution": ("auto", "480p", "720p", "1080p", "2160p"),
     "subtitle_mode": ("server", "off"),
+    # When to ask "Who's watching?": automatic (saved profile), every launch, or after 1 h / 12 h away.
+    "profile_select": ("auto", "always", "1h", "12h"),
 }
 
-INTEGER_CHOICES = {"progress_interval": (5, 10), "page_size": (25, 50, 100)}
+INTEGER_CHOICES = {
+    "progress_interval": (5, 10),
+    "page_size": (25, 50, 100),
+    "resume_rewind": (0, 3, 5, 7, 10, 15, 30),  # seconds to back up when resuming
+    "still_watching": (0, 2, 3, 4, 5),  # auto-played episodes before asking; 0 never asks
+    "next_up_lead": (15, 30, 45, 60),  # seconds before the end when a file has no credits marker
+    "max_bitrate": (0, 4000, 8000, 12000, 20000, 40000),  # kbps for converted streams; 0 = no limit
+}
 
 
 def _read(addon, name):

@@ -9,6 +9,7 @@ from urllib.parse import quote, urlencode, urljoin, urlsplit
 
 from .api import ApiError
 from .capabilities import playback_capabilities
+from .player_extras import STREAK
 from .recovery import forget_session, remember_session, remember_stop
 from .storage import StorageError
 
@@ -18,8 +19,8 @@ class PlaybackError(Exception):
 
 
 # Terminal reasons a 201 carries when the original file exceeds what this
-# device declared (HDR range or resolution) and the route the server would
-# need instead is one this direct-play build does not offer.
+# device declared (HDR range or resolution) and the server cannot convert it
+# for this device either.
 CAPABILITY_TERMINALS = frozenset({
     "client_hls_unsupported", "adaptation_unavailable", "hdr_transcode_unsupported",
     "video_conversion_unsupported", "dv_conversion_unsupported",
@@ -30,6 +31,13 @@ CAPABILITY_GUIDANCE = (
     "Dolby Vision or 4K. If your TV supports it, change Settings → Playback → "
     "HDR and Dolby Vision capability or Maximum video resolution, then play it again."
 )
+# Server deliveries this build executes. Converted streams arrive as HLS;
+# progressive remux is declared disabled in capabilities.py.
+HLS_DELIVERIES = ("server_remux_hls", "server_transcode_hls")
+SUPPORTED_DELIVERIES = ("original_http",) + HLS_DELIVERIES
+REPLAN_OPERATIONS = ("failure_recovery", "seek_reanchor", "track_change", "quality_change")
+INTENT_OPERATIONS = ("track_change", "quality_change")
+MAX_RECOVERY_ATTEMPTS = 3
 SUBTITLE_LIMIT = 8 * 1024 * 1024
 SUBTITLE_EXTENSIONS = ("srt", "vtt", "ass", "ssa")
 
@@ -113,10 +121,32 @@ def kodi_media_url(server_url, stream):
     return url + ("|" + urlencode(headers, quote_via=quote) if headers else "")
 
 
+def is_converted(plan):
+    """True when the server repackages or re-encodes the file (HLS)."""
+    return (plan or {}).get("delivery") in HLS_DELIVERIES
+
+
+def server_anchored(plan):
+    """True when seeks must go back through the server (protocol v3 §5).
+
+    A growing HLS playlist (every copy remux, and a transcode of unknown
+    length) cannot seek locally past what FFmpeg has produced; the plan says
+    so with ``can_seek_anywhere: false``.
+    """
+    return (plan or {}).get("timeline", {}).get("can_seek_anywhere") is False
+
+
+def _bandwidth_cap(options):
+    value = options.get("max_bitrate")
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return max(100, min(1000000, value))
+
+
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.4.1", options=None):
+    def __init__(self, client, mode="auto", version="0.5.0", options=None):
         self.client, self.mode, self.version = client, mode, version
         self.options = dict(options or {})
         # /api/v2 calls this installation_id, but it identifies the SERVER.
@@ -132,6 +162,13 @@ class PlaybackSession:
         self.position = 0.0
         self.paused = False
         self.has_sample = False
+        # Replan identity: the start request's attempt, the client-minted id of
+        # the plan now playing, and the loop guard for failure recovery.
+        self.start_body = None
+        self.plan_attempt_id = None
+        self.attempted_keys = []
+        self.attempt_count = 1
+        self.quality_preference = str(self.options.get("quality_preference") or "auto")
 
     def _negotiate(self):
         capability = self.client.request("GET", "/playback/capabilities", None)
@@ -139,8 +176,8 @@ class PlaybackSession:
             raise PlaybackError("Playback is not available for this profile on the server.")
         if 3 not in capability.get("protocol_versions", []):
             raise PlaybackError("The server does not offer playback protocol 3.")
-        if "original_http" not in capability.get("deliveries", []):
-            raise PlaybackError("The server does not offer original-file playback.")
+        if not any(delivery in capability.get("deliveries", []) for delivery in SUPPORTED_DELIVERIES):
+            raise PlaybackError("The server does not offer a playback route this device can use.")
         identity = capability.get("installation_id")
         if not isinstance(identity, str) or not identity:
             raise PlaybackError("The server did not provide its playback installation identity.")
@@ -150,23 +187,30 @@ class PlaybackSession:
         self.client.store.set("playback_installation_id", identity)
         return [feature for feature in ("subrip_sidecar_v1",) if feature in capability.get("features", [])]
 
+    def _capabilities(self):
+        return playback_capabilities(self.mode, self.version, self.options.get("max_resolution", "auto"),
+                                     self.options.get("client_audio_selection", True))
+
     def start(self, file_id, start_position=None):
         profile_id = self.client.store.get("profile_id")
         if not profile_id:
             raise PlaybackError("Choose a profile before playing a title.")
         features = self._negotiate()
-        codecs, context = playback_capabilities(self.mode, self.version, self.options.get("max_resolution", "auto"),
-                                                self.options.get("client_audio_selection", True))
+        codecs, context = self._capabilities()
         body = {
             "installation_id": self.installation_id,
             "protocol_version": 3, "client_features": features,
             "file_id": str(file_id), "profile_id": str(profile_id),
-            "playback_attempt_id": str(uuid.uuid4()), "quality_preference": "auto",
+            "playback_attempt_id": str(uuid.uuid4()), "quality_preference": self.quality_preference,
             "subtitle_fidelity_preference": "compatible",
             "progress_persistence": "server",
             "allow_alternate_versions": False,
             "client_capabilities": codecs, "client_playback_context": context,
         }
+        cap = _bandwidth_cap(self.options)
+        if cap is not None:
+            # The server converts anything above this ceiling (decimal kbps).
+            body["bandwidth_cap_kbps"] = cap
         if start_position is not None:
             body["start_position"] = _number(start_position)
         # Without a subtitle field Silo plans subtitles off.
@@ -197,14 +241,21 @@ class PlaybackSession:
             raise PlaybackError("The playback response is missing its session identifier.")
         # Keep the id before validation so the caller can release a refused plan.
         self.plan = plan
+        self.start_body = body
+        self.plan_attempt_id = str(uuid.uuid4())
         try:
             self.recovery_key = remember_session(self.client, self.installation_id, self.session_id)
         except StorageError as error:
             # Media must not open without a durable cleanup record. The live
             # session id is retained so finally can still release this attempt.
             raise PlaybackError(str(error)) from error
-        if plan.get("protocol_version") != 3 or plan.get("delivery") != "original_http":
-            raise PlaybackError("This build currently supports original-file direct play only.")
+        self._validate(plan)
+        self.position = _number(plan["timeline"]["source_start_seconds"])
+        return plan
+
+    def _validate(self, plan):
+        if plan.get("protocol_version") != 3 or plan.get("delivery") not in SUPPORTED_DELIVERIES:
+            raise PlaybackError("This device cannot play the playback route the server chose.")
         if any(t.get("executor") == "client" for t in plan.get("transformations", [])):
             raise PlaybackError("This plan needs a client video transformation that is not available.")
         timeline = plan.get("timeline") or {}
@@ -214,18 +265,105 @@ class PlaybackSession:
         except (KeyError, TypeError, ValueError) as error:
             raise PlaybackError("The server returned an invalid playback timeline.") from error
         kodi_media_url(self.client.server_url, plan.get("stream") or {})
-        self.position = _number(timeline["source_start_seconds"])
-        return plan
+
+    def can_replan(self):
+        plan = self.plan or {}
+        return bool(self.session_id and self.start_body and isinstance(plan.get("plan_id"), str)
+                    and isinstance(plan.get("plan_attempt_key"), str) and plan["plan_attempt_key"])
+
+    def replan(self, operation, position=None, quality=None, audio_index=None, classification=None,
+               client=None):
+        """Ask the server for another plan for this session (protocol v3 §6).
+
+        ``position`` is a source position. Intent operations (track and
+        quality changes) keep the current route eligible; failure recovery
+        sends every key already tried so the server cannot hand one back.
+        Returns the new, validated plan; a terminal answer raises
+        PlaybackError and leaves the current plan in place. Network and HTTP
+        errors propagate as ApiError/OSError.
+        """
+        if operation not in REPLAN_OPERATIONS:
+            raise PlaybackError("Unknown playback change.")
+        if not self.can_replan():
+            raise PlaybackError("This playback cannot be changed while it plays.")
+        plan, intent = self.plan, operation in INTENT_OPERATIONS
+        # Only failure recovery excludes routes already tried; a reanchor is a
+        # timeline operation and may legitimately return the same route.
+        guarded = operation == "failure_recovery"
+        codecs, context = self._capabilities()
+        if quality is not None:
+            quality = str(quality).strip() or "auto"
+        body = {
+            "installation_id": self.installation_id, "protocol_version": 3,
+            "client_features": list(self.start_body.get("client_features") or []),
+            "operation": operation,
+            "playback_attempt_id": self.start_body["playback_attempt_id"],
+            "replan_request_id": str(uuid.uuid4()),
+            "failed_plan_id": plan["plan_id"], "plan_attempt_id": self.plan_attempt_id,
+            "plan_attempt_key": plan["plan_attempt_key"],
+            "attempt_count": 1 if intent else min(8, self.attempt_count),
+            "quality_preference": quality if quality is not None else self.quality_preference,
+            "client_capabilities": codecs, "client_playback_context": context,
+        }
+        if "bandwidth_cap_kbps" in self.start_body:
+            body["bandwidth_cap_kbps"] = self.start_body["bandwidth_cap_kbps"]
+        attempted = []
+        if guarded:
+            attempted = list(dict.fromkeys(self.attempted_keys + [plan["plan_attempt_key"]]))[-16:]
+            body["attempted_plan_keys"] = attempted
+        if operation == "failure_recovery":
+            body["failure"] = {"classification": str(classification or "playback_failed")[:64]}
+        if position is not None:
+            body["position_seconds"] = min(31536000.0, _number(position))
+        if operation == "track_change":
+            # Only a track change reads an omitted subtitle as "off", so the
+            # current server subtitle is restated with the new audio track.
+            tracks = {}
+            if isinstance(audio_index, int) and not isinstance(audio_index, bool) and audio_index >= 0:
+                tracks["audio"] = {"index": audio_index}
+            subtitle = plan.get("subtitle") or {}
+            if subtitle.get("mode") not in (None, "off") and subtitle.get("track_id"):
+                tracks["subtitle"] = {"id": str(subtitle["track_id"])}
+            body["selected_tracks"] = tracks
+        decision = (client or self.client).request("POST", self.path + "/replan", body)
+        if not isinstance(decision, dict) or decision.get("protocol_version") != 3:
+            raise PlaybackError("The server did not return playback protocol 3.")
+        if decision.get("outcome") != "playable":
+            terminal = decision.get("terminal") or {}
+            raise PlaybackError(terminal.get("message") or terminal.get("reason") or "No other route is available.")
+        candidate = decision.get("playback_plan") or {}
+        session_id = decision.get("session_id") or candidate.get("session_id")
+        if session_id and session_id != self.session_id:
+            raise PlaybackError("The server moved playback to another session.")
+        self._validate(candidate)
+        key = candidate.get("plan_attempt_key")
+        if guarded and key in attempted:
+            raise PlaybackError("The server offered a playback route that already failed on this device.")
+        self.plan = candidate
+        self.plan_attempt_id = str(uuid.uuid4())
+        if quality is not None:
+            self.quality_preference = quality
+        if intent:
+            self.attempted_keys, self.attempt_count = [], 1
+        elif guarded:
+            self.attempted_keys, self.attempt_count = attempted, self.attempt_count + 1
+        return candidate
 
     @property
     def path(self):
         return "/playback/" + quote(str(self.session_id), safe="")
 
-    def record_position(self, player_position, paused=False):
-        """Keep the latest confirmed local position even between heartbeats."""
+    def record_position(self, player_position, paused=False, offset=None):
+        """Keep the latest confirmed local position even between heartbeats.
+
+        ``offset`` is the timeline offset of the plan the sample was taken
+        on; it defaults to the current plan's, and is passed explicitly so a
+        sample queued just before a stream switch keeps its own timeline.
+        """
         if not self.session_id or not self.plan:
             return
-        offset = self.plan["timeline"]["timeline_offset_seconds"]
+        if offset is None:
+            offset = self.plan["timeline"]["timeline_offset_seconds"]
         self.position = _number(float(player_position) + float(offset))
         self.paused = bool(paused)
         self.has_sample = True
@@ -236,10 +374,10 @@ class PlaybackSession:
             raise PlaybackError("The server did not accept the playback progress sample.")
         self.pending_progress = None
 
-    def progress(self, player_position, paused=False):
+    def progress(self, player_position, paused=False, offset=None):
         if not self.session_id or not self.plan:
             return
-        self.record_position(player_position, paused)
+        self.record_position(player_position, paused, offset)
         if self.pending_progress is not None:
             previous = self.pending_progress
             self._send_progress()  # Identical sequence/body after a lost response.
@@ -398,16 +536,38 @@ class ProgressReporter:
         self._owner_stalled = False
         self._notice = None
         self._serial = 0
+        self._held = 0
         self._done = threading.Event()
         self._thread = threading.Thread(target=self._run, name="SiloPlaybackReports", daemon=True)
         self._thread.start()
 
-    def submit(self, position, paused=False):
+    def submit(self, position, paused=False, offset=None):
+        """Queue a player-time sample; ``offset`` pins the plan timeline it belongs to."""
         sample = (_number(position), bool(paused))
+        if offset is not None:
+            sample += (_number(offset, signed=True),)
         with self._condition:
             if not self._closing:
                 self._latest = sample
                 self._updated_at = self.clock()
+                self._condition.notify()
+
+    def hold(self):
+        """Suspend the owner watchdog while the controller blocks on purpose.
+
+        A stream switch or a modal dialog keeps the polling path busy for
+        longer than ``owner_timeout``; heartbeats of the last sample continue.
+        """
+        with self._condition:
+            self._held += 1
+
+    def release(self):
+        with self._condition:
+            self._held = max(0, self._held - 1)
+            if not self._held:
+                # A new stream may still be seeking to its start: give the
+                # owner the startup window again until its next sample.
+                self._created_at, self._updated_at = self.clock(), None
                 self._condition.notify()
 
     def close(self):
@@ -456,7 +616,7 @@ class ProgressReporter:
                         now = self.clock()
                         deadline = (self._updated_at + self.owner_timeout if self._updated_at is not None
                                     else self._created_at + self.startup_timeout)
-                        if now >= deadline:
+                        if now >= deadline and not self._held:
                             # Repeating a stale last position would otherwise
                             # keep Silo alive while Kodi's polling path hangs.
                             self._owner_stalled = True
@@ -487,8 +647,43 @@ class ProgressReporter:
             self._done.set()
 
 
+SEEK_JUMP_SECONDS = 10.0
+ADAPTIVE_ADDON = "inputstream.adaptive"
+
+
+def rewound_start(start_position, rewind):
+    """Back a saved resume point up by ``rewind`` seconds, never below zero."""
+    if start_position is None:
+        return None
+    start = _number(start_position)
+    if start <= 0 or isinstance(rewind, bool) or not isinstance(rewind, (int, float)) or rewind <= 0:
+        return start
+    return max(0.0, start - float(rewind))
+
+
+def effective_file_id(plan, file_id=None):
+    """The file the server actually streams (v2 ``effective_media_file_id``)."""
+    plan = plan or {}
+    value = plan.get("effective_media_file_id") or plan.get("effective_file_id") or file_id
+    return str(value) if value not in (None, "") else None
+
+
+def plan_duration(plan):
+    """Player-time length from the plan, never from a growing HLS playlist."""
+    try:
+        duration = _number((plan.get("source") or {})["duration_seconds"])
+        offset = _number(plan["timeline"]["timeline_offset_seconds"], signed=True)
+    except (KeyError, TypeError, ValueError, PlaybackError):
+        return None
+    return duration - offset if duration > offset else None
+
+
 class PlaybackController:
     """Poll Kodi locally while a separate worker reports server progress."""
+
+    # Consecutive Up next auto-advances. application.play makes one controller
+    # per episode, so the count lives on the class and survives the hand-off.
+    streak = STREAK
 
     def __init__(self, client, addon):
         self.client, self.addon = client, addon
@@ -497,10 +692,15 @@ class PlaybackController:
         # Set by the application: find the episode after ``item``, and resolve art.
         self.next_lookup = None
         self.image = None
+        # Set by the application: open_screen(name, **kwargs) for the subtitle
+        # tools, and a callable telling whether AI subtitle translation is on.
+        self.open_screen = None
+        self.subtitle_ai_enabled = None
         # Why playback stopped for something else: next episode, version, sleep.
         self.next_action = None
+        self.loaded_subtitle = None
 
-    def _extras(self, player, item, plan, options, file_id, log_event):
+    def _extras(self, player, item, plan, options, file_id, log_event, seek=None, ai_enabled=None):
         """Overlays for this playback, or None where Kodi cannot draw them."""
         try:
             import xbmcgui
@@ -513,7 +713,7 @@ class PlaybackController:
             log_event("extras_unavailable")
             return None
         path = self.addon.getAddonInfo("path")
-        effective = plan.get("effective_file_id") or file_id
+        effective = effective_file_id(plan, file_id)
         version = default_version(item, preferred_file_id=effective)
 
         def notify(message):
@@ -524,13 +724,15 @@ class PlaybackController:
             menu_factory=lambda: PlayerMenu(path), home=xbmcgui.Window(10000), notify=notify,
             next_lookup=self.next_lookup, image=self.image, versions=available_versions(item),
             file_id=effective, save_setting=self.addon.setSetting,
-            log=lambda event, position=None: log_event(event, position))
+            log=lambda event, position=None: log_event(event, position),
+            streak=self.streak, seek=seek, ai_enabled=ai_enabled)
 
     def _save_subtitle(self, artifact, log_event):
         """Download a sidecar with the add-on's own headers; return a local path.
 
         A missing subtitle never blocks playback: failures are logged by code
-        and the title plays without it.
+        and the title plays without it. Older sidecars are removed, except the
+        one Kodi currently shows.
         """
         import xbmcvfs
 
@@ -538,8 +740,9 @@ class PlaybackController:
             data = self.client.download(artifact.get("url"), SUBTITLE_LIMIT)
             folder = os.path.join(xbmcvfs.translatePath(self.addon.getAddonInfo("profile")), "subtitles")
             os.makedirs(folder, mode=0o700, exist_ok=True)
+            keep = os.path.abspath(self.loaded_subtitle) if self.loaded_subtitle else None
             for name in os.listdir(folder):
-                if name.startswith("silo-subtitle-"):
+                if name.startswith("silo-subtitle-") and os.path.abspath(os.path.join(folder, name)) != keep:
                     try:
                         os.unlink(os.path.join(folder, name))
                     except OSError:
@@ -552,7 +755,13 @@ class PlaybackController:
             log_event("subtitle_unavailable", error=error if isinstance(error, ApiError) else None)
             return None
 
-    def play(self, item, start_position=None, file_id=None, options=None):
+    def play(self, item, start_position=None, file_id=None, options=None, exact_start=False):
+        """Play ``item``; ``start_position`` is source seconds (None = server resume).
+
+        A saved resume point is backed up by ``options["resume_rewind"]``
+        seconds unless ``exact_start`` says the position is a deliberate one
+        (a chapter or the place a version switch left off).
+        """
         import xbmc
         import xbmcgui
         from .settings import read_options
@@ -560,7 +769,10 @@ class PlaybackController:
         options = dict(read_options(self.addon) if options is None else options)
         self.last_result = None
         self.last_reporter = None
+        self.loaded_subtitle = None
         condition = getattr(xbmc, "getCondVisibility", None)
+        if not exact_start:
+            start_position = rewound_start(start_position, options.get("resume_rewind", 0))
 
         class Player(xbmc.Player):
             # Kodi dispatches these asynchronously. Callbacks only change Python
@@ -571,16 +783,28 @@ class PlaybackController:
             ended = False
             paused = False
             state_revision = 0
+            # While a new stream replaces the current one, and briefly after
+            # it starts, the old item's stop/end callbacks are not the viewer's.
+            switching = False
+            quiet_until = 0.0
+
+            def _stale(self):
+                return self.switching or time.monotonic() < self.quiet_until
 
             def onAVStarted(self):
+                if self.switching:
+                    self.switching = False
+                    self.quiet_until = time.monotonic() + 3
                 self.started = True
 
             def onPlayBackStopped(self):
-                self.finished = True
+                if not self._stale():
+                    self.finished = True
 
             def onPlayBackEnded(self):
-                self.ended = True
-                self.finished = True
+                if not self._stale():
+                    self.ended = True
+                    self.finished = True
 
             def onPlayBackError(self):
                 self.failed = True
@@ -603,18 +827,34 @@ class PlaybackController:
                 message += " status={} code={}".format(int(error.status), code or "unspecified")
             xbmc.log(message, xbmc.LOGWARNING if error is not None else xbmc.LOGINFO)
 
+        def notify(message):
+            try:
+                xbmcgui.Dialog().notification("Silo", message, time=3000, sound=False)
+            except (AttributeError, RuntimeError):
+                log_event("notification_unavailable")
+
+        def has_condition(name):
+            try:
+                return bool(condition and condition(name))
+            except (RuntimeError, TypeError):
+                return False
+
         session = PlaybackSession(self.client, options.get("dv_mode", "auto"),
                                   self.addon.getAddonInfo("version"), options=options)
         player, monitor = Player(), xbmc.Monitor()
         opened, stop_requested = False, False
         reporter, guard, latest_sample, extras = None, None, None, None
         stage, last_notice = "planning", 0
+        used_adaptive = False
+        pending_reanchor = []
         self.next_action = None
         self.last_progress_error = None
 
         def start_reporter():
             clone = getattr(self.client, "reporting_client", None)
             session.client = clone(timeout=1.5) if clone is not None else self.client
+            # The session's own client is now the short-timeout reporting
+            # clone; replans and subtitle downloads keep using self.client.
             worker = ProgressReporter(session, 5 if options.get("progress_interval") == 5 else 10)
             self.last_reporter = worker
             return worker
@@ -623,28 +863,39 @@ class PlaybackController:
             nonlocal stop_requested
             if opened and not player.finished and not stop_requested:
                 stop_requested = True
+                player.switching, player.quiet_until = False, 0.0
                 try:
                     player.stop()
                 except RuntimeError:
                     log_event("native_stop_unavailable")
 
-        try:
-            version = "".join(char for char in self.addon.getAddonInfo("version") if char in "0123456789.")[:24]
-            log_event("begin_v" + (version or "unknown"))
-            plan = session.start(str(file_id) if file_id is not None else select_file(item), start_position)
-            log_event("plan_ready", session.position)
+        def source_position():
+            if latest_sample is not None:
+                return _number(latest_sample[0] + latest_sample[2])
+            return session.position
+
+        def mount(plan, switching):
+            """Hand one plan's stream to Kodi; "started", "failed", "finished" or "aborted"."""
+            nonlocal opened, stage, guard, used_adaptive
+            converted = is_converted(plan)
             path = kodi_media_url(self.client.server_url, plan["stream"])
             # Subtitle setup, including any credential refresh, happens before
             # media opens. Sidecars are saved locally so Kodi never receives a
-            # URL carrying the sign-in or profile token.
+            # URL carrying the sign-in or profile token. An HLS transport has no
+            # subtitle stream, so only original files select embedded tracks.
             subtitle = plan.get("subtitle") or {}
             subtitle_path, embedded_index = None, None
             if options.get("subtitle_mode", "server") != "off":
                 if subtitle.get("artifact"):
                     subtitle_path = self._save_subtitle(subtitle["artifact"], log_event)
-                else:
+                elif not converted:
                     embedded_index = embedded_subtitle_index(subtitle)
-            reporter = start_reporter()
+            used_adaptive = bool(converted and not native_only
+                                 and has_condition("System.HasAddon({})".format(ADAPTIVE_ADDON))
+                                 and has_condition("System.AddonIsEnabled({})".format(ADAPTIVE_ADDON)))
+            headers = ""
+            if used_adaptive:
+                path, _, headers = path.partition("|")
             listitem = xbmcgui.ListItem(label=item.get("title", "Silo"), path=path)
             tag = listitem.getVideoInfoTag()
             tag.setTitle(item.get("title", "Silo"))
@@ -653,23 +904,37 @@ class PlaybackController:
             # Silo supplies subtitles itself; never let Kodi probe the stream's
             # "folder" for subtitle files (Kodi does this for LAN servers).
             listitem.setProperty("no-ext-subs-scan", "true")
+            if used_adaptive:
+                listitem.setProperty("inputstream", ADAPTIVE_ADDON)
+                # A growing EVENT playlist must start at its first segment, not
+                # at the live edge; the plan's player_start is applied by seek.
+                listitem.setProperty("inputstream.adaptive.play_timeshift_buffer", "true")
+                if headers:
+                    listitem.setProperty("inputstream.adaptive.manifest_headers", headers)
+                    listitem.setProperty("inputstream.adaptive.stream_headers", headers)
             if plan["stream"].get("mime_type"):
                 listitem.setMimeType(plan["stream"]["mime_type"])
             listitem.setContentLookup(False)
             stage = "opening"
+            player.started = player.failed = player.ended = player.finished = False
+            player.switching = switching
             player.play(path, listitem)
             opened = True
-            deadline = time.monotonic() + 30
+            limit = 60 if converted else 30
+            deadline = time.monotonic() + limit
             while not player.started and not player.finished:
                 if monitor.waitForAbort(0.2):
+                    player.switching = False
                     stop_local()
-                    return
+                    return "aborted"
                 if time.monotonic() >= deadline:
-                    raise PlaybackError("Kodi did not start playback within 30 seconds.")
+                    player.switching = False
+                    raise PlaybackError("Kodi did not start playback within {} seconds.".format(limit))
+            player.switching = False
             if player.failed:
-                raise PlaybackError("Kodi could not open the original media file.")
+                return "failed"
             if player.finished:
-                return
+                return "finished"
             log_event("av_started")
             start = _number(plan["timeline"]["player_start_seconds"])
             guard = ResumeGuard(start)
@@ -678,7 +943,8 @@ class PlaybackController:
                 player.seekTime(start)
             stage = "track_setup"
             audio_index = (plan.get("selected_tracks", {}).get("audio") or {}).get("index")
-            if not player.finished and audio_index is not None:
+            if not converted and not player.finished and audio_index is not None:
+                # An HLS transport carries only the planned audio track.
                 streams = player.getAvailableAudioStreams()
                 if not player.finished and 0 <= audio_index < len(streams):
                     player.setAudioStream(audio_index)
@@ -687,18 +953,142 @@ class PlaybackController:
                     player.showSubtitles(False)
                 elif subtitle_path:
                     player.setSubtitles(subtitle_path)
+                    self.loaded_subtitle = subtitle_path
                 elif embedded_index is not None:
                     streams = player.getAvailableSubtitleStreams()
                     if not player.finished and 0 <= embedded_index < len(streams):
                         player.setSubtitleStream(embedded_index)
                         player.showSubtitles(True)
+            return "started"
+
+        native_only = False
+
+        def open_plan(plan, switching=False):
+            """Mount ``plan``; if Kodi cannot open it, fall back natively, then replan."""
+            nonlocal native_only
+            native_only = False
+            while True:
+                outcome = mount(plan, switching)
+                if outcome != "failed":
+                    return outcome
+                if used_adaptive:
+                    log_event("adaptive_open_failed")
+                    native_only = True
+                    continue
+                if not session.can_replan() or session.attempt_count >= MAX_RECOVERY_ATTEMPTS:
+                    raise PlaybackError("Kodi could not open the original media file." if not is_converted(plan)
+                                        else "Kodi could not open the converted stream.")
+                # The route itself failed on this device: let the server pick
+                # another one, excluding every key already tried.
+                log_event("failure_recovery", session.position)
+                plan = session.replan("failure_recovery", position=session.position,
+                                      classification="player_open_failed", client=self.client)
+                native_only = False
+
+        def switch(operation, target=None, **changes):
+            """Replan this session and move Kodi to the new stream."""
+            nonlocal stage, recovery, previous
+            position = target if target is not None else source_position()
+            reporter.hold()
+            try:
+                stage = "replan"
+                try:
+                    plan = session.replan(operation, position=position, client=self.client, **changes)
+                except PlaybackError as error:
+                    log_event("replan_refused_" + operation)
+                    notify(str(error))
+                    return None
+                except (ApiError, OSError) as error:
+                    log_event("replan_failed_" + operation, error=error if isinstance(error, ApiError) else None)
+                    if isinstance(error, ApiError) and error.status in (404, 410):
+                        raise PlaybackError("The playback session ended. Open the title again.")
+                    notify("Silo could not change playback. Try again.")
+                    return None
+                log_event("replan_" + operation, position)
+                outcome = open_plan(plan, switching=True)
+                if outcome == "started":
+                    recovery, previous = StallRecovery(), None
+                    if extras is not None:
+                        extras.update_plan(plan, session.quality_preference)
+                    stage = "polling"
+                return outcome
+            finally:
+                reporter.release()
+
+        def run_screen(command):
+            """Open a subtitle tool from the player menu, paused while it is open."""
+            name = command.get("screen")
+            hook = self.open_screen
+            if not callable(hook):
+                notify("This option is not available here.")
+                return
+            kwargs = {"item": item, "file_id": effective_file_id(session.plan, file_id), "plan": session.plan}
+            if name == "subtitle_translate":
+                kwargs["position"] = source_position()
+            if name == "subtitle_sync":
+                kwargs["subtitle"] = command.get("subtitle")
+            was_paused = player.paused
+            if not was_paused:
+                player.pause()
+            if latest_sample is not None:
+                reporter.submit(latest_sample[0], True, latest_sample[2])
+            reporter.hold()
+            try:
+                result = hook(name, **kwargs)
+            except Exception:  # A tool must never end playback.
+                log_event("screen_failed_" + "".join(char for char in str(name) if char.isalnum() or char == "_"))
+                result = None
+            finally:
+                reporter.release()
+            if player.finished:
+                return
+            if isinstance(result, str) and result:
+                player.setSubtitles(result)
+                player.showSubtitles(True)
+                self.loaded_subtitle = result
+            if not was_paused:
+                player.pause()
+
+        def ai_enabled():
+            hook = self.subtitle_ai_enabled
+            if not callable(hook):
+                return False
+            reporter.hold()
+            try:
+                return bool(hook())
+            except Exception:
+                return False
+            finally:
+                reporter.release()
+
+        def extras_seek(target):
+            # On a server-anchored timeline a deliberate jump is a reanchor.
+            if server_anchored(session.plan):
+                pending_reanchor.append(_number(target) + session.plan["timeline"]["timeline_offset_seconds"])
+            else:
+                player.seekTime(target)
+
+        recovery, previous = StallRecovery(), None
+        try:
+            version = "".join(char for char in self.addon.getAddonInfo("version") if char in "0123456789.")[:24]
+            log_event("begin_v" + (version or "unknown"))
+            plan = session.start(str(file_id) if file_id is not None else select_file(item), start_position)
+            log_event("plan_ready", session.position)
+            reporter = start_reporter()
+            reporter.hold()  # Kodi may take up to a minute to open a converted stream.
+            try:
+                outcome = open_plan(plan)
+            finally:
+                reporter.release()
+            if outcome != "started":
+                return
             stage = "polling"
             if not player.finished:
-                extras = self._extras(player, item, plan, options, file_id, log_event)
+                extras = self._extras(player, item, session.plan, options, file_id, log_event,
+                                      seek=extras_seek, ai_enabled=ai_enabled)
             extras_total, extras_total_at = None, 0.0
             revision = player.state_revision
             unavailable_since = None
-            recovery = StallRecovery()
             while not player.finished:
                 if monitor.waitForAbort(0.25):
                     stop_local()
@@ -738,9 +1128,24 @@ class PlaybackController:
                     break
                 if not guard.accept(current):
                     continue
-                latest_sample = (_number(current), bool(player.paused))
+                offset = session.plan["timeline"]["timeline_offset_seconds"]
+                latest_sample = (_number(current), bool(player.paused), _number(offset, signed=True))
                 reporter.submit(*latest_sample)
-                caching = bool(condition and condition("Player.Caching"))
+                now = time.monotonic()
+                if server_anchored(session.plan) and previous is not None:
+                    expected = previous[0] + (0.0 if latest_sample[1] else now - previous[1])
+                    if abs(latest_sample[0] - expected) > SEEK_JUMP_SECONDS:
+                        # Kodi seeked inside a growing playlist; the server has
+                        # to re-cut the stream at the new position (§6).
+                        log_event("seek_reanchor", latest_sample[0])
+                        previous = None
+                        if extras is not None:
+                            extras.interaction()
+                        if switch("seek_reanchor", target=source_position()) not in (None, "started"):
+                            break
+                        continue
+                previous = (latest_sample[0], now)
+                caching = has_condition("Player.Caching")
                 if recovery.nudges >= recovery.max_nudges:
                     if not recovery.exhausted_reported:
                         recovery.exhausted_reported = True
@@ -757,26 +1162,42 @@ class PlaybackController:
                     if target is not None:
                         log_event("stall_recovery_seek", current)
                         player.seekTime(target)
+                command = None
                 if extras is not None and not player.finished:
                     if total is not None or time.monotonic() - extras_total_at >= 5:
                         extras_total_at = time.monotonic()
-                        if total is None:
+                        if total is None and plan_duration(session.plan) is None:
                             try:
                                 total = player.getTotalTime()
                             except (AttributeError, RuntimeError):
                                 total = None
-                        extras_total = total or extras_total
+                        extras_total = plan_duration(session.plan) or total or extras_total
                     command = extras.tick(latest_sample[0], latest_sample[1], extras_total)
-                    if command and command.get("native"):
-                        xbmc.executebuiltin("ActivateWindow({})".format(command["native"]))
-                    elif command and command.get("stop"):
-                        self.next_action = command
-                        log_event("stop_for_" + command["stop"], current)
-                        stop_local()
+                if command and command.get("native"):
+                    xbmc.executebuiltin("ActivateWindow({})".format(command["native"]))
+                elif command and command.get("stop"):
+                    self.next_action = command
+                    log_event("stop_for_" + command["stop"], current)
+                    stop_local()
+                    break
+                elif command and command.get("screen"):
+                    run_screen(command)
+                elif command and command.get("replan") == "quality":
+                    if switch("quality_change", quality=command.get("quality")) not in (None, "started"):
+                        break
+                elif command and command.get("replan") == "track":
+                    if switch("track_change", audio_index=command.get("audio_index")) not in (None, "started"):
+                        break
+                if pending_reanchor and not player.finished:
+                    target = pending_reanchor.pop()
+                    del pending_reanchor[:]
+                    if switch("seek_reanchor", target=target) not in (None, "started"):
                         break
                 if revision != player.state_revision:
                     revision = player.state_revision
                     log_event("paused" if player.paused else "resumed", current)
+                    if extras is not None:
+                        extras.interaction()
             if player.failed:
                 log_event("native_error")
                 raise PlaybackError("Kodi reported a playback error.")
@@ -798,15 +1219,18 @@ class PlaybackController:
             if extras is not None:
                 extras.close()
             stop_local()
-            source_position = session.position
+            source = session.position
             if latest_sample is not None and session.plan:
-                source_position = _number(latest_sample[0] + session.plan["timeline"]["timeline_offset_seconds"])
+                source = source_position()
             self.last_result = {"has_sample": latest_sample is not None,
-                                "position_seconds": source_position, "ended": bool(player.ended)}
+                                "position_seconds": source, "ended": bool(player.ended)}
+            if not (isinstance(self.next_action, dict) and self.next_action.get("auto")):
+                # Only an unattended Up next countdown keeps the streak going.
+                self.streak.reset()
             if reporter is None and session.session_id is not None:
                 reporter = start_reporter()
             if reporter is not None:
                 if latest_sample is not None:
                     reporter.submit(*latest_sample)
                 reporter.close()
-                log_event("cleanup_queued", source_position if latest_sample else None)
+                log_event("cleanup_queued", source if latest_sample else None)

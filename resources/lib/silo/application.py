@@ -35,7 +35,19 @@ class Application:
         self.server_name = ""
         self._libraries = None
 
-    def run(self):
+    def run(self, argv=None):
+        """Start the add-on; ``play <id>`` / ``open <id>`` arguments deep-link
+        straight to a title (used by the Kodi home-screen widgets)."""
+        from .deeplink import deep_link
+
+        self.deep_link = deep_link([str(arg) for arg in (argv or [])[1:]])
+        home = xbmcgui.Window(10000) if hasattr(xbmcgui, "Window") else None
+        if home is not None and self.deep_link and home.getProperty("silo.running"):
+            # A widget click while Silo Theater is open: never start a second copy.
+            self.dialog.notification("Silo Theater", "Silo Theater is already open.", time=3000, sound=False)
+            return
+        if home is not None:
+            home.setProperty("silo.running", "1")
         try:
             self._run()
         except ApiError as exc:
@@ -46,12 +58,80 @@ class Application:
             # Do not log exception text: networking exceptions can contain signed URLs.
             xbmc.log("[Silo] Unexpected application error", xbmc.LOGERROR)
             self.dialog.ok("Silo", "Silo could not continue. Check the Kodi log for diagnostics.")
+        finally:
+            if home is not None:
+                home.clearProperty("silo.running")
+
+    def _profile_dir(self):
+        return xbmcvfs.translatePath(self.addon.getAddonInfo("profile"))
+
+    def _session_path(self, server_url):
+        """Each server keeps its own sign-in, so switching servers keeps both."""
+        from .api import normalize_server_url
+        from .storage import session_path
+
+        try:
+            server_url = normalize_server_url(server_url) if server_url else ""
+        except ValueError:
+            pass  # Sign-in reports the bad address; keep the raw value here.
+        return session_path(self._profile_dir(), server_url)
+
+    def known_servers(self):
+        from .storage import SessionStore as Store
+
+        servers = Store(os.path.join(self._profile_dir(), "servers.json")).get("servers", [])
+        return [str(url) for url in servers if isinstance(url, str) and url]
+
+    def remember_server(self, server_url, remove=False):
+        from .storage import SessionStore as Store
+
+        store = Store(os.path.join(self._profile_dir(), "servers.json"))
+        servers = [url for url in store.get("servers", []) if url != server_url]
+        if not remove:
+            servers.insert(0, server_url)
+        store.set("servers", servers[:10])
+
+    def switch_server(self):
+        """Pick a remembered server or add one; return True when the server changed."""
+        current = self.client.server_url if self.client is not None else ""
+        servers = [url for url in self.known_servers() if url != current]
+        labels = [urlsplit(url).hostname or url for url in servers] + ["Add a server…"]
+        selected = self.dialog.select("Switch server", labels)
+        if not isinstance(selected, int) or selected < 0:
+            return False
+        if selected < len(servers):
+            target = servers[selected]
+        else:
+            target = (self.dialog.input("Silo server address", "https://", type=xbmcgui.INPUT_ALPHANUM) or "").strip()
+            if not target or target == "https://":
+                return False
+        self.addon.setSetting("server_url", target)
+        self.store = None  # The next run opens the session saved for that server.
+        return True
+
+    PROFILE_PROMPT_SECONDS = {"1h": 3600, "12h": 12 * 3600}
+
+    def profile_prompt_due(self):
+        """Whether "Ask who's watching" wants the picker on this launch."""
+        mode = self.options().get("profile_select", "auto")
+        if mode == "always":
+            return True
+        limit = self.PROFILE_PROMPT_SECONDS.get(mode)
+        if limit is None:
+            return False
+        last = self.store.get("last_active")
+        return not isinstance(last, (int, float)) or time.time() - last > limit
+
+    def mark_active(self):
+        try:
+            self.store.set("last_active", int(time.time()))
+        except (StorageError, AttributeError):
+            pass
 
     def _run(self):
-        if self.store is None:
-            self.store = SessionStore(os.path.join(
-                xbmcvfs.translatePath(self.addon.getAddonInfo("profile")), "session.json"))
         server_url = self.addon.getSetting("server_url").strip()
+        if self.store is None:
+            self.store = SessionStore(self._session_path(server_url))
         self.client = None
         self._login_message = ""
         if server_url:
@@ -72,11 +152,25 @@ class Application:
         if not signed_in and not self.sign_in():
             return
         server_url = self.client.server_url
-        if not self.choose_profile():
+        try:
+            self.remember_server(server_url)
+        except (StorageError, OSError):
+            pass
+        if not self.choose_profile(force=self.profile_prompt_due()):
             return
+        self.mark_active()
         self._recover_playback()
         self.ensure_display_setup()
         self.sync_keymap()
+        if getattr(self, "deep_link", None):
+            action, content_id = self.deep_link
+            self.deep_link = None
+            if action == "play":
+                self.guard(lambda: self.play(self.client.item(content_id)))
+            else:
+                self.guard(lambda: self.open_item({"content_id": content_id}))
+            self.mark_active()
+            return
 
         while not self.monitor.abortRequested():
             window = HomeWindow("SiloHome.xml", self.addon.getAddonInfo("path"),
@@ -85,19 +179,32 @@ class Application:
             window.doModal()
             action = window.result
             del window
-            if action == "profile":
+            self.mark_active()
+            if action == "settings":
+                from .ui_settings import open_settings
+
+                # Silo Settings can hand back an account action or ask for the
+                # Kodi add-on settings ("device").
+                choice = self.guard(lambda: open_settings(self))
+                if choice in ("server", "logout"):
+                    action = choice
+                elif choice == "device":
+                    self.addon.openSettings()
+                    if self.addon.getSetting("server_url").strip() != server_url:
+                        self.store = None
+                        self._run()
+                        return
+                    continue
+                else:
+                    continue
+            if action == "server":
+                if self.switch_server():
+                    self._run()
+                    return
+            elif action == "profile":
                 if not self.choose_profile(force=True):
                     return
                 self._recover_playback()
-            elif action == "settings":
-                from .ui_settings import open_settings
-
-                if self.guard(lambda: open_settings(self)) != "device":
-                    continue
-                self.addon.openSettings()
-                if self.addon.getSetting("server_url").strip() != server_url:
-                    self._run()
-                    return
             elif action == "logout":
                 try:
                     self.client.logout()
@@ -195,7 +302,9 @@ class Application:
         while not self.monitor.abortRequested():
             credentials = prompt_login(self.addon, server_url=server_url, username=username,
                                        allow_code=methods is None or "device" in methods,
-                                       allow_password=methods is None or "password" in methods, message=message)
+                                       allow_password=methods is None or "password" in methods, message=message,
+                                       allow_signup=self._signup_allowed(methods),
+                                       signup=lambda _server: self._create_account())
             if credentials is None:
                 return False
             server_url = credentials["server_url"]
@@ -247,6 +356,21 @@ class Application:
                 password = ""
                 credentials.clear()
         return False
+
+    def _signup_allowed(self, methods):
+        if self.client is None or methods is None or "password" not in methods:
+            return False
+        try:
+            from .ui_people import signup_available
+
+            return bool(signup_available(self.client))
+        except Exception:
+            return False
+
+    def _create_account(self):
+        from .ui_people import create_account
+
+        return create_account(self.client, self.dialog)
 
     def device_sign_in(self, auth):
         from .ui_people import CodeScreen
@@ -304,7 +428,8 @@ class Application:
 
             account = self.store.get("login_username", "") if self.store.get("login_username_server") == (
                 self.client.server_url if self.client is not None else None) else ""
-            selected = pick_profile(self.addon.getAddonInfo("path"), profiles, preselect, account)
+            selected = pick_profile(self.addon.getAddonInfo("path"), profiles, preselect, account,
+                                    application=self)
         if not isinstance(selected, int) or not 0 <= selected < len(profiles):
             return False
         profile = profiles[selected]
@@ -328,6 +453,7 @@ class Application:
         self.profile_name = str(profile["name"])
         self.profile_avatar = avatar_image(profile.get("avatar_url"))
         self._libraries = None  # Library access differs per profile.
+        self._requests_enabled = None
         return True
 
     def guard(self, callback):
@@ -465,7 +591,7 @@ class Application:
                 detail["user_data"] = progress
         self._after_playback_item = (self._playback_item_key(item, file_id), detail)
 
-    def play(self, item, resume=None, file_id=None, subtitle_index=None, start_at=None):
+    def play(self, item, resume=None, file_id=None, subtitle_index=None, start_at=None, auto_next=True):
         """Generic Play follows preferences; explicit Resume/Start keeps its intent.
 
         Return the chosen file so the detail screen can retain it after refresh.
@@ -475,7 +601,11 @@ class Application:
         if not self.is_playable(item):
             return None
         self._after_playback_item = None
-        options = dict(self.options(), auto_skip=self.auto_skip())
+        options = dict(self.options(), auto_skip=self.auto_skip(),
+                       quality_preference=(self.profile or {}).get("quality_preference") or "auto")
+        if not auto_next:
+            # Shuffle and extras pick what plays next themselves.
+            options["auto_next"] = False
         if isinstance(subtitle_index, int) and not isinstance(subtitle_index, bool) and subtitle_index >= 0:
             options = dict(options, subtitle_track_index=subtitle_index)
         version = default_version(item, options["file_selection"], file_id)
@@ -514,16 +644,26 @@ class Application:
             start_position = start_at
         controller = PlaybackController(self.client, self.addon)
         controller.next_lookup, controller.image = self.next_episode, self.image
+        controller.open_screen = self.open_screen
+        controller.subtitle_ai_enabled = self.subtitle_ai_enabled
         try:
-            controller.play(selected_item, start_position=start_position, file_id=file_id, options=options)
+            controller.play(selected_item, start_position=start_position, file_id=file_id, options=options,
+                            exact_start=start_at is not None)
         finally:
             self._cache_playback_item(selected_item, file_id, getattr(controller, "last_result", None))
+        try:
+            from .widgets import clear_cache
+
+            clear_cache(self.addon)  # Widgets show the new resume point and watched state.
+        except Exception:
+            pass
+        self.last_playback_result = getattr(controller, "last_result", None)
         action = getattr(controller, "next_action", None)
         if isinstance(action, dict) and action.get("stop") == "version":
             # The player menu switched files: continue on the new one where playback was.
             self.play(selected_item, resume=True, file_id=action["file_id"], subtitle_index=subtitle_index,
-                      start_at=action.get("position"))
-        elif isinstance(action, dict) and action.get("stop") == "next" and action.get("item"):
+                      start_at=action.get("position"), auto_next=auto_next)
+        elif isinstance(action, dict) and action.get("stop") == "next" and action.get("item") and auto_next:
             # Up next: open the episode fresh so its files, markers and progress are current.
             self.play(self.client.item(action["item"]["content_id"]), resume=True)
         return file_id
@@ -568,7 +708,7 @@ class Application:
 
     @staticmethod
     def is_playable(item):
-        return item.get("type") in ("movie", "episode")
+        return item.get("type") in ("movie", "episode", "extra")
 
     @staticmethod
     def resume_seconds(item):
@@ -582,6 +722,54 @@ class Application:
         updated = self.client.update_profile(profile_id, changes)
         self.profile = dict(self.profile, **(updated if isinstance(updated, dict) else changes))
         return self.profile
+
+    # Screens open each other through this table, so no window imports another
+    # window's module. Each entry is (module in this package, function); the
+    # function is called as function(application, **kwargs).
+    SCREENS = {
+        "for_you": ("ui_browse", "open_for_you"),
+        "calendar": ("ui_browse", "open_calendar"),
+        "collections": ("ui_browse", "open_collections"),
+        "collection": ("ui_browse", "open_collection"),
+        "library_sections": ("ui_browse", "open_library_sections"),
+        "personal": ("ui_browse", "open_personal"),
+        "person": ("ui_browse", "open_person"),
+        "requests": ("ui_requests", "open_requests"),
+        "manage_profiles": ("ui_people", "manage_profiles"),
+        "subtitle_search": ("ui_subtitles", "search_subtitles"),
+        "subtitle_translate": ("ui_subtitles", "translate_subtitles"),
+        "subtitle_sync": ("ui_subtitles", "sync_subtitles"),
+    }
+
+    def open_screen(self, name, **kwargs):
+        """Open another screen by name; returns whatever that screen returns."""
+        import importlib
+
+        module_name, function_name = self.SCREENS[name]
+        module = importlib.import_module("." + module_name, __package__)
+        return getattr(module, function_name)(self, **kwargs)
+
+    def subtitle_ai_enabled(self):
+        """Whether the server offers AI subtitle translation (asked once per session)."""
+        if getattr(self, "_subtitle_ai", None) is None:
+            try:
+                from .svc_subtitles import ai_status
+
+                self._subtitle_ai = ai_status(self.client)["enabled"]
+            except Exception:
+                self._subtitle_ai = False
+        return self._subtitle_ai
+
+    def requests_enabled(self):
+        """Whether this server offers media requests (cached per profile)."""
+        if getattr(self, "_requests_enabled", None) is None:
+            try:
+                from .svc_requests import enabled
+
+                self._requests_enabled = bool(enabled(self.client))
+            except Exception:
+                self._requests_enabled = False
+        return self._requests_enabled
 
     def auto_skip(self):
         """The profile's auto-skip switches, as the player reads them."""

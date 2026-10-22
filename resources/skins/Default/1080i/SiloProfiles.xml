@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Profile picker ("Who's watching?"). ui_people.ProfilePicker fills list 300 and
-     re-centres it: each column is 284 px (256 px profile plus a 28 px gap). -->
+<!-- Profile picker ("Who's watching?") and Manage profiles. ui_people.ProfilePicker and
+     ui_people.ManageWindow fill list 300 and re-centre it: each column is 284 px (256 px
+     profile plus a 28 px gap). Button 320 is "Manage profiles" on the picker and "Done" when
+     managing; 321 is "Manage as <primary profile>" for a profile that cannot manage. -->
 <window type="dialog">
   <defaultcontrol always="true">300</defaultcontrol>
   <coordinates><system>1</system><width>1920</width><height>1080</height></coordinates>
@@ -11,19 +13,21 @@
     <control type="image"><left>90</left><top>60</top><width>100</width><height>52</height><aspectratio>keep</aspectratio><texture>silo_wordmark.png</texture></control>
     <control type="label"><left>214</left><top>60</top><width>400</width><height>52</height><aligny>center</aligny><font>font36_title</font><textcolor>FFEDEDED</textcolor><label>Theater</label></control>
 
-    <control type="label"><left>160</left><top>232</top><width>1600</width><height>80</height><align>center</align><aligny>center</aligny><font>font52_title</font><textcolor>FFEDEDED</textcolor><label>Who's watching?</label></control>
+    <control type="label"><left>160</left><top>232</top><width>1600</width><height>80</height><align>center</align><aligny>center</aligny><font>font52_title</font><textcolor>FFEDEDED</textcolor><label>$INFO[Window.Property(silo.heading)]</label></control>
     <control type="label"><left>160</left><top>316</top><width>1600</width><height>40</height><align>center</align><aligny>center</aligny><font>font12</font><textcolor>9EEDEDED</textcolor><label>$INFO[Window.Property(silo.account_label),Signed in as ,]</label><visible>!String.IsEmpty(Window.Property(silo.account_label))</visible></control>
+    <control type="textbox"><left>360</left><top>316</top><width>1200</width><height>72</height><align>center</align><font>font12</font><textcolor>BFEDEDED</textcolor><label>$INFO[Window.Property(silo.note)]</label><visible>!String.IsEmpty(Window.Property(silo.note))</visible></control>
 
     <control type="list" id="300">
       <left>108</left><top>400</top><width>1704</width><height>390</height>
       <orientation>horizontal</orientation>
       <scrolltime tween="cubic" easing="out">200</scrolltime>
+      <ondown condition="!String.IsEmpty(Window.Property(silo.can_manage))">320</ondown>
       <itemlayout width="284" height="390">
         <control type="image"><left>32</left><top>32</top><width>220</width><height>220</height><texture colordiffuse="FF15171C">circle.png</texture></control>
         <control type="label"><left>32</left><top>32</top><width>220</width><height>220</height><align>center</align><aligny>center</aligny><font>font52_title</font><textcolor>B3EDEDED</textcolor><label>$INFO[ListItem.Property(silo.initials)]</label></control>
         <control type="image"><left>32</left><top>32</top><width>220</width><height>220</height><aspectratio>scale</aspectratio><texture diffuse="mask_circle.png" background="true">$INFO[ListItem.Art(thumb)]</texture></control>
         <control type="label"><left>14</left><top>272</top><width>256</width><height>44</height><align>center</align><aligny>center</aligny><font>font27</font><textcolor>9EEDEDED</textcolor><label>$INFO[ListItem.Label]</label></control>
-        <control type="label"><left>14</left><top>316</top><width>256</width><height>30</height><align>center</align><aligny>center</aligny><font>font10</font><textcolor>9EEDEDED</textcolor><label>PIN</label><visible>!String.IsEmpty(ListItem.Property(silo.pin))</visible></control>
+        <control type="label"><left>14</left><top>316</top><width>256</width><height>30</height><align>center</align><aligny>center</aligny><font>font10</font><textcolor>9EEDEDED</textcolor><label>$INFO[ListItem.Property(silo.caption)]</label></control>
       </itemlayout>
       <focusedlayout width="284" height="390">
         <control type="group">
@@ -35,8 +39,29 @@
           <control type="image"><left>32</left><top>32</top><width>220</width><height>220</height><aspectratio>scale</aspectratio><texture diffuse="mask_circle.png" background="true">$INFO[ListItem.Art(thumb)]</texture></control>
         </control>
         <control type="label"><left>14</left><top>282</top><width>256</width><height>44</height><align>center</align><aligny>center</aligny><font>font27</font><textcolor>FFEDEDED</textcolor><label>$INFO[ListItem.Label]</label><scroll>true</scroll></control>
-        <control type="label"><left>14</left><top>326</top><width>256</width><height>30</height><align>center</align><aligny>center</aligny><font>font10</font><textcolor>9EEDEDED</textcolor><label>PIN</label><visible>!String.IsEmpty(ListItem.Property(silo.pin))</visible></control>
+        <control type="label"><left>14</left><top>326</top><width>256</width><height>30</height><align>center</align><aligny>center</aligny><font>font10</font><textcolor>9EEDEDED</textcolor><label>$INFO[ListItem.Property(silo.caption)]</label></control>
       </focusedlayout>
+    </control>
+
+    <control type="grouplist">
+      <left>160</left><top>830</top><width>1600</width><height>76</height>
+      <orientation>horizontal</orientation><align>center</align><itemgap>24</itemgap>
+      <control type="button" id="321">
+        <width>480</width><height>76</height>
+        <label>$INFO[Window.Property(silo.unlock_label)]</label><font>font25_title</font><align>center</align><aligny>center</aligny>
+        <textcolor>FFEDEDED</textcolor><focusedcolor>FF000000</focusedcolor>
+        <texturefocus border="38" colordiffuse="FFEDEDED">pill76.png</texturefocus><texturenofocus border="38">pill76_idle.png</texturenofocus>
+        <onup>300</onup><ondown>300</ondown>
+        <visible>!String.IsEmpty(Window.Property(silo.unlock_label))</visible>
+      </control>
+      <control type="button" id="320">
+        <width>360</width><height>76</height>
+        <label>$INFO[Window.Property(silo.manage_label)]</label><font>font25_title</font><align>center</align><aligny>center</aligny>
+        <textcolor>FFEDEDED</textcolor><focusedcolor>FF000000</focusedcolor>
+        <texturefocus border="38" colordiffuse="FFEDEDED">pill76.png</texturefocus><texturenofocus border="38">pill76_idle.png</texturenofocus>
+        <onup>300</onup><ondown>300</ondown>
+        <visible>!String.IsEmpty(Window.Property(silo.can_manage))</visible>
+      </control>
     </control>
 
     <control type="label"><left>90</left><top>990</top><width>1400</width><height>30</height><aligny>center</aligny><font>font10</font><textcolor>80EDEDED</textcolor><label>Silo Theater is a community add-on for Silo, not an official Silo app.</label></control>

@@ -340,7 +340,17 @@ class PlayerMenuWindow(xbmcgui.WindowXMLDialog):
         self.ready = True
         self.build(focus=True)
 
+    def converted_audio(self):
+        """The file's audio tracks when the stream itself carries only one."""
+        if not self.context.get("converted"):
+            return []
+        return [track for track in self.context.get("audio_tracks") or []
+                if isinstance(track, dict) and isinstance(track.get("index"), int)]
+
     def audio_streams(self):
+        converted = self.converted_audio()
+        if converted:
+            return [_text(track.get("label")) for track in converted]
         streams = player_call("getAvailableAudioStreams", default=None)
         return [_text(name) for name in streams] if isinstance(streams, (list, tuple)) else []
 
@@ -485,6 +495,10 @@ class PlayerMenuWindow(xbmcgui.WindowXMLDialog):
             current = next((version for version in versions if version.get("file_id") == context.get("file_id")), None)
             rows.append({"key": "version", "label": "Version",
                          "value": _text(current.get("label")) if current else ""})
+        qualities = self.qualities()
+        if qualities:
+            current = next((label for value, label in qualities if value == self.context.get("quality")), "Auto")
+            rows.append({"key": "quality", "label": "Quality", "value": current})
         if self.menu.speed_supported():
             rows.append({"key": "speed", "label": "Speed", "value": speed_label(self.menu.speed)})
         ok, result = jsonrpc("Player.GetViewMode")
@@ -500,7 +514,21 @@ class PlayerMenuWindow(xbmcgui.WindowXMLDialog):
                          "value": "On" if context.get("auto_next") else "Off"})
         return rows
 
+    def qualities(self):
+        """("auto", "Auto") plus the server's menu; empty when it offers no choice."""
+        entries = [(_text(entry.get("value")), _text(entry.get("label")) or _text(entry.get("value")))
+                   for entry in self.context.get("qualities") or [] if isinstance(entry, dict) and entry.get("value")]
+        return [("auto", "Auto")] + entries if entries else []
+
     def rows_audio(self):
+        converted = self.converted_audio()
+        if converted:
+            # Another track needs a new stream from the server (track_change).
+            rows = [{"key": "audio_track", "index": track["index"],
+                     "label": _text(track.get("label")) or "Track {}".format(track["index"] + 1),
+                     "checked": track["index"] == self.context.get("audio_index")} for track in converted]
+            rows.append({"key": "native", "window": "osdaudiosettings", "label": "Audio settings (delay, passthrough)…"})
+            return rows
         current = self.stream_state()["audio"]
         rows = [{"key": "audio", "index": index, "label": name or "Track {}".format(index + 1),
                  "checked": index == current} for index, name in enumerate(self.audio_streams())]
@@ -513,6 +541,12 @@ class PlayerMenuWindow(xbmcgui.WindowXMLDialog):
         rows.extend({"key": "subtitle", "index": index, "label": name or "Track {}".format(index + 1),
                      "checked": state["enabled"] and index == state["subtitle"]}
                     for index, name in enumerate(self.subtitle_streams()))
+        if self.context.get("subtitle_tools"):
+            rows.append({"key": "tool", "screen": "subtitle_search", "label": "Search online…"})
+            if self.context.get("ai_translate"):
+                rows.append({"key": "tool", "screen": "subtitle_translate", "label": "Translate with AI…"})
+            if self.context.get("subtitle_sync"):
+                rows.append({"key": "tool", "screen": "subtitle_sync", "label": "Sync to audio…"})
         rows.append({"key": "native", "window": "osdsubtitlesettings", "label": "Subtitle style and timing…"})
         return rows
 
@@ -620,8 +654,16 @@ class PlayerMenuWindow(xbmcgui.WindowXMLDialog):
         elif key == "chapter":
             player_call("seekTime", float(row["seconds"]))
             self.dismiss()
+        elif key == "audio_track":
+            if row["index"] != self.context.get("audio_index"):
+                self.menu.queue({"action": "audio_track", "index": row["index"]})
+                self.dismiss()
         elif key == "native":
             self.menu.queue({"action": "native", "window": row["window"]})
+            self.dismiss()
+        elif key == "tool":
+            # The controller pauses playback and opens the tool's dialog.
+            self.menu.queue({"action": "subtitle_tool", "screen": row["screen"]})
             self.dismiss()
         elif key == "skip_prompts" or key == "auto_next":
             value = not self.context.get(key)
@@ -661,6 +703,15 @@ class PlayerMenuWindow(xbmcgui.WindowXMLDialog):
         choice = self.pick("Version", labels, current)
         if choice >= 0 and choice != current:
             self.menu.queue({"action": "version", "file_id": versions[choice].get("file_id")})
+            self.dismiss()
+
+    def pick_quality(self):
+        qualities = self.qualities()
+        values = [value for value, _ in qualities]
+        current = values.index(self.context.get("quality")) if self.context.get("quality") in values else 0
+        choice = self.pick("Quality", [label for _, label in qualities], current)
+        if choice >= 0 and choice != current:
+            self.menu.queue({"action": "quality", "value": values[choice]})
             self.dismiss()
 
     def pick_speed(self):

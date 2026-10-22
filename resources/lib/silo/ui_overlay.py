@@ -1,4 +1,8 @@
-"""Small windows drawn over playing video: the skip button and Up next."""
+"""Small windows drawn over playing video: the skip button and Up next.
+
+Up next doubles as "Are you still watching?": the same card, without a
+countdown, whose buttons read Continue and Stop.
+"""
 
 import xbmc
 import xbmcgui
@@ -35,7 +39,7 @@ class _OverlayWindow(xbmcgui.WindowXMLDialog):
             forward_transport(action_id)
 
     def onClick(self, control_id):
-        self.owner._choose({100: "skip", 200: "play", 201: "dismiss"}.get(control_id, "dismiss"))
+        self.owner._choose(self.owner.choice_for(control_id))
 
 
 class _Overlay:
@@ -47,6 +51,9 @@ class _Overlay:
         self.addon_path = addon_path
         self.window = None
         self.choice = None
+
+    def choice_for(self, control_id):
+        return {100: "skip", 200: "play", 201: "dismiss"}.get(control_id, "dismiss")
 
     def _choose(self, choice):
         self.choice = choice
@@ -95,11 +102,26 @@ class UpNextCard(_Overlay):
 
     XML = "SiloUpNext.xml"
 
-    def show(self, episode, seconds=None):
-        self._show({"silo.next_eyebrow": episode.get("eyebrow", ""),
+    def __init__(self, addon_path):
+        super().__init__(addon_path)
+        self.still = False
+
+    def choice_for(self, control_id):
+        # In the still-watching card the second button stops playback; Back
+        # (handled in onAction) only hides the card.
+        if control_id == 201 and self.still:
+            return "stop"
+        return super().choice_for(control_id)
+
+    def show(self, episode, seconds=None, still=False):
+        self.still = bool(still)
+        self._show({"silo.next_heading": "STILL WATCHING?" if still else "UP NEXT",
+                    "silo.next_eyebrow": episode.get("eyebrow", ""),
                     "silo.next_title": episode.get("title", ""),
                     "silo.next_thumb": episode.get("thumb", ""),
-                    "silo.next_countdown": self.countdown_text(seconds)}, 200)
+                    "silo.next_countdown": "Up next when you continue" if still else self.countdown_text(seconds),
+                    "silo.next_play": "Continue" if still else "Play now",
+                    "silo.next_hide": "Stop" if still else "Hide"}, 200)
 
     def update(self, seconds):
         if self.window is not None:

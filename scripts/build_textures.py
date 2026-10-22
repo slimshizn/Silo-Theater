@@ -213,6 +213,55 @@ def draw_plus(draw, s):
     _stroke(draw, [(s * 0.22, s * 0.5), (s * 0.78, s * 0.5)], w)
 
 
+def _bookmark_shape(s):
+    return [(s * 0.28, s * 0.16), (s * 0.72, s * 0.16), (s * 0.72, s * 0.84), (s * 0.50, s * 0.66),
+            (s * 0.28, s * 0.84)]
+
+
+def draw_bookmark(draw, s):
+    draw.line(_bookmark_shape(s) + [_bookmark_shape(s)[0]], fill=OPAQUE, width=int(s * 0.075), joint="curve")
+
+
+def draw_bookmark_filled(draw, s):
+    draw.polygon(_bookmark_shape(s), fill=OPAQUE)
+
+
+def _heart(draw, s, fill):
+    r = s * 0.19
+    left, right, top = (s * 0.33, s * 0.38), (s * 0.67, s * 0.38), s * 0.38
+    outline = None if fill else OPAQUE
+    width = 0 if fill else int(s * 0.075)
+    if fill:
+        draw.ellipse([left[0] - r, top - r, left[0] + r, top + r], fill=OPAQUE)
+        draw.ellipse([right[0] - r, top - r, right[0] + r, top + r], fill=OPAQUE)
+        draw.polygon([(s * 0.15, s * 0.44), (s * 0.85, s * 0.44), (s * 0.50, s * 0.84)], fill=OPAQUE)
+    else:
+        draw.arc([left[0] - r, top - r, left[0] + r, top + r], 150, 360, fill=outline, width=width)
+        draw.arc([right[0] - r, top - r, right[0] + r, top + r], 180, 30, fill=outline, width=width)
+        _stroke(draw, [(s * 0.165, s * 0.47), (s * 0.50, s * 0.84), (s * 0.835, s * 0.47)], width)
+
+
+def draw_heart(draw, s):
+    _heart(draw, s, False)
+
+
+def draw_heart_filled(draw, s):
+    _heart(draw, s, True)
+
+
+def draw_more(draw, s):
+    for x in (0.26, 0.50, 0.74):
+        draw.ellipse([s * x - s * 0.07, s * 0.43, s * x + s * 0.07, s * 0.57], fill=OPAQUE)
+
+
+def draw_shuffle(draw, s):
+    w = int(s * 0.075)
+    _stroke(draw, [(s * 0.16, s * 0.30), (s * 0.34, s * 0.30), (s * 0.62, s * 0.70), (s * 0.78, s * 0.70)], w)
+    _stroke(draw, [(s * 0.16, s * 0.70), (s * 0.34, s * 0.70), (s * 0.62, s * 0.30), (s * 0.78, s * 0.30)], w)
+    for y in (0.30, 0.70):
+        draw.polygon([(s * 0.86, s * y), (s * 0.74, s * (y - 0.10)), (s * 0.74, s * (y + 0.10))], fill=OPAQUE)
+
+
 def brand_light(size):
     """Soft blue, red and orange light for the sign-in and profile screens."""
     width, height = size
@@ -283,6 +332,12 @@ def textures():
         "icon_subtitles.png": icon(draw_subtitles),
         "icon_chevron_down.png": icon(draw_chevron_down),
         "icon_plus.png": icon(draw_plus),
+        "icon_bookmark.png": icon(draw_bookmark),
+        "icon_bookmark_filled.png": icon(draw_bookmark_filled),
+        "icon_heart.png": icon(draw_heart),
+        "icon_heart_filled.png": icon(draw_heart_filled),
+        "icon_more.png": icon(draw_more),
+        "icon_shuffle.png": icon(draw_shuffle),
     }
 
 

@@ -10,6 +10,7 @@ PASSWORD_CONTROL = 103
 SIGN_IN_CONTROL = 201
 CODE_CONTROL = 202
 CANCEL_CONTROL = 203
+SIGNUP_CONTROL = 204
 
 
 class LoginValidationError(ValueError):
@@ -45,7 +46,8 @@ def login_submission(action, server_url, username="", password="", allow_code=Tr
             "username": username, "password": password}
 
 
-def prompt_login(addon, server_url="", username="", allow_code=True, allow_password=True, message=""):
+def prompt_login(addon, server_url="", username="", allow_code=True, allow_password=True, message="",
+                 allow_signup=False, signup=None):
     """Show server, username and masked password together; return data or None.
 
     Passwords only leave this function in a confirmed password submission.
@@ -67,6 +69,7 @@ def prompt_login(addon, server_url="", username="", allow_code=True, allow_passw
             self.setProperty("silo.allow_password", "true" if allow_password else "")
             self.setProperty("silo.sign_in_label", "Sign in" if allow_password else "Check server")
             self.setProperty("silo.login_message", str(message or ""))
+            self.setProperty("silo.allow_signup", "true" if allow_signup and signup is not None else "")
             server = self.getControl(SERVER_CONTROL)
             user = self.getControl(USERNAME_CONTROL)
             password = self.getControl(PASSWORD_CONTROL)
@@ -89,6 +92,12 @@ def prompt_login(addon, server_url="", username="", allow_code=True, allow_passw
         def onClick(self, control_id):
             if control_id == CANCEL_CONTROL:
                 self.cancel()
+            elif control_id == SIGNUP_CONTROL and allow_signup and signup is not None:
+                # A new account comes back as a password submission for the normal sign-in.
+                result = signup(self.getControl(SERVER_CONTROL).getText())
+                if result:
+                    self.result = result
+                    self.close()
             elif control_id in (SIGN_IN_CONTROL, CODE_CONTROL):
                 action = "code" if control_id == CODE_CONTROL else "password" if allow_password else "discover"
                 try:

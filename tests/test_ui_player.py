@@ -608,6 +608,75 @@ class TrackTabTests(MenuTestCase):
         self.assertTrue(self.menu.is_open())
 
 
+class ConvertedMenuRowTests(MenuTestCase):
+    QUALITIES = [{"value": "original", "label": "Original"}, {"value": "1080p-medium", "label": "1080p Medium"}]
+    TRACKS = [{"index": 0, "label": "ENG · TRUEHD · 7.1"}, {"index": 1, "label": "Commentary · AAC · Stereo"}]
+
+    def test_quality_row_shows_the_current_choice_and_queues_a_replan(self):
+        window = self.open(tab="video", qualities=self.QUALITIES, quality="auto")
+        self.assertEqual(self.rows(window)[0], ("Quality", "Auto"))
+        KODI.choices = [2]
+        self.click_row(window, "Quality")
+        self.assertEqual(KODI.selects[-1], ("Quality", ["Auto", "Original", "1080p Medium"], 0))
+        self.assertEqual(self.menu.take_result(), [{"action": "quality", "value": "1080p-medium"}])
+        self.assertFalse(self.menu.is_open())
+
+    def test_picking_the_current_quality_or_backing_out_queues_nothing(self):
+        window = self.open(tab="video", qualities=self.QUALITIES, quality="original")
+        self.assertEqual(dict(self.rows(window))["Quality"], "Original")
+        KODI.choices = [1]
+        self.click_row(window, "Quality")
+        KODI.choices = [-1]
+        self.click_row(window, "Quality")
+        self.assertEqual(self.menu.take_result(), [])
+        self.assertTrue(self.menu.is_open())
+
+    def test_no_server_choices_hide_the_quality_row(self):
+        window = self.open(tab="video", qualities=[])
+        self.assertNotIn("Quality", dict(self.rows(window)))
+
+    def test_converted_audio_lists_the_files_tracks_and_asks_for_a_new_stream(self):
+        KODI.player.audio = ["aac"]
+        window = self.open(tab="audio", converted=True, audio_tracks=self.TRACKS, audio_index=1)
+        self.assertEqual([row["label"] for row in window.rows][:2], [track["label"] for track in self.TRACKS])
+        self.assertEqual([row.get("checked") for row in window.rows][:2], [False, True])
+        self.click_row(window, "Commentary · AAC · Stereo")  # already playing
+        self.assertEqual(self.menu.take_result(), [])
+        self.click_row(window, "ENG · TRUEHD · 7.1")
+        self.assertEqual(self.menu.take_result(), [{"action": "audio_track", "index": 0}])
+        self.assertNotIn(("setAudioStream", 0), KODI.player.actions())
+        self.assertFalse(self.menu.is_open())
+
+    def test_converted_audio_keeps_the_tab_even_when_kodi_sees_no_streams(self):
+        KODI.player.audio = []
+        window = self.open(converted=True, audio_tracks=self.TRACKS, audio_index=0)
+        self.assertIn("audio", window.tabs)
+
+    def test_direct_play_audio_still_switches_locally(self):
+        window = self.open(tab="audio", converted=False, audio_tracks=self.TRACKS, audio_index=0)
+        self.click_row(window, "Commentary")
+        self.assertIn(("setAudioStream", 1), KODI.player.actions())
+        self.assertEqual(self.menu.take_result(), [])
+
+    def test_subtitle_tools_queue_intents_and_close(self):
+        window = self.open(tab="subtitles", subtitle_tools=True, ai_translate=True, subtitle_sync=True)
+        labels = [row["label"] for row in window.rows]
+        self.assertEqual(labels[-4:], ["Search online…", "Translate with AI…", "Sync to audio…",
+                                       "Subtitle style and timing…"])
+        self.click_row(window, "Sync to audio…")
+        self.assertEqual(self.menu.take_result(), [{"action": "subtitle_tool", "screen": "subtitle_sync"}])
+        self.assertFalse(self.menu.is_open())
+
+    def test_ai_and_sync_rows_need_server_support(self):
+        window = self.open(tab="subtitles", subtitle_tools=True, ai_translate=False, subtitle_sync=False)
+        labels = [row["label"] for row in window.rows]
+        self.assertIn("Search online…", labels)
+        self.assertNotIn("Translate with AI…", labels)
+        self.assertNotIn("Sync to audio…", labels)
+        window = self.open(tab="subtitles")
+        self.assertNotIn("Search online…", [row["label"] for row in window.rows])
+
+
 class HelperTests(unittest.TestCase):
     def test_clock(self):
         self.assertEqual(ui_player.clock(5), "0:05")

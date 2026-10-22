@@ -13,10 +13,12 @@ from unittest.mock import patch
 from urllib.parse import parse_qs
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "resources/lib"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from silo.playback import (CAPABILITY_TERMINALS, PlaybackController, PlaybackError, PlaybackSession,
                            ProgressReporter, ResumeGuard, StallRecovery, embedded_subtitle_index,
-                           kodi_media_url, select_file, subtitle_extension)
+                           effective_file_id, kodi_media_url, plan_duration, rewound_start, select_file,
+                           server_anchored, subtitle_extension)
 from silo.api import ApiError, SiloClient
 from silo.storage import StorageError
 from playback_contract import assert_contract
@@ -38,10 +40,60 @@ def playable_decision(offset=0, source_start=0, player_start=0):
     }
 
 
+SESSION = "11111111-1111-4111-8111-111111111111"
+
+
+def hls_decision(delivery="server_transcode_hls", source_start=0.0, origin=0.0, plan_id="plan:transcode-0001",
+                 key="v3:transcode0001", qualities=None):
+    """A converted decision shaped like /api/v2 projects the server's plan.
+
+    A transcode of known length gets a complete timeline (seek locally); a
+    copy remux is served from FFmpeg's growing playlist, anchored at the
+    preceding keyframe ``origin`` and seeked through the server.
+    """
+    growing = delivery == "server_remux_hls"
+    timeline = {"source_start_seconds": source_start,
+                "stream_origin_seconds": origin if growing else 0,
+                "player_start_seconds": source_start - origin if growing else source_start,
+                "timeline_offset_seconds": origin if growing else 0,
+                "can_seek_anywhere": not growing,
+                "seek_restoration": "source_position" if growing else "player_position"}
+    if growing:
+        timeline["seek_window_start_seconds"] = origin
+    return {
+        "protocol_version": 3, "server_features": ["playback_plan_v3"], "outcome": "playable",
+        "session_id": SESSION,
+        "playback_plan": {
+            "protocol_version": 3, "plan_id": plan_id, "plan_attempt_key": key, "session_id": SESSION,
+            "delivery": delivery,
+            "stream": {"url": "/api/v2/playback/transcode/%s/master.m3u8?st=opaque" % SESSION,
+                       "protocol": "hls", "container": "hls", "mime_type": "application/vnd.apple.mpegurl",
+                       "headers": {}, "header_refresh": "none"},
+            "timeline": timeline,
+            "selected_tracks": {"audio": {"id": "file:42:audio:1", "index": 1}},
+            "effective_recipe": {"video_codec": "h264", "audio_codec": "aac", "width": 1920, "height": 1080,
+                                 "bitrate_kbps": 6000, "dynamic_range": "sdr", "audio_channels": 2},
+            "subtitle": {"mode": "off", "inventory": []},
+            "transformations": [{"name": "video_to_h264", "executor": "server", "recipe_version": "1"},
+                                {"name": "audio_to_aac", "executor": "server", "recipe_version": "2"}],
+            "available_qualities": qualities if qualities is not None else [
+                {"label": "original", "display_name": "Original", "height": 2160, "bitrate_kbps": 25000,
+                 "preserves_source": True},
+                {"label": "1080p-medium", "display_name": "1080p Medium", "height": 1080, "bitrate_kbps": 6000,
+                 "preserves_source": False}],
+            "degradation_warnings": [], "decision_reason": "quality_auto_source",
+            "requested_media_file_id": "42", "effective_media_file_id": "42",
+            "source": {"media_file_id": "42", "duration_seconds": 3000, "container": "mkv",
+                       "video_codec": "hevc", "audio_codec": "dts"},
+        },
+    }
+
+
 def server_capabilities(identity="11111111-2222-4333-8444-555555555555"):
     return {"installation_id": identity, "state": "available", "allowed": True,
             "protocol_versions": [3], "features": ["subrip_sidecar_v1", "sequenced_progress_v1"],
-            "deliveries": ["original_http"], "revision": "opaque"}
+            "deliveries": ["original_http", "server_remux_progressive", "server_remux_hls",
+                           "server_transcode_hls"], "revision": "opaque"}
 
 
 class MemoryStore:
@@ -73,6 +125,7 @@ class FakeClient:
         self.capabilities = server_capabilities()
         self.subtitle_bytes = b"1\n00:00:01,000 --> 00:00:02,000\nHello\n"
         self.download_error = None
+        self.replans = []
 
     def download(self, url, max_bytes):
         self.calls.append(("DOWNLOAD", url, None))
@@ -86,6 +139,11 @@ class FakeClient:
             return deepcopy(self.capabilities)
         if path == "/playback/start":
             return deepcopy(self.decision)
+        if path.endswith("/replan"):
+            answer = self.replans.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return deepcopy(answer)
         if path.endswith("/progress"):
             if self.fail_progress_once:
                 self.fail_progress_once = False
@@ -491,7 +549,7 @@ class ResumeGuardTests(unittest.TestCase):
             select_file({"files": [{"file_id": "bad", "unreadable": True}]})
 
 
-class ControllerTests(unittest.TestCase):
+class KodiHarness(unittest.TestCase):
     def run_player(self, client, events, start=None, options=None, file_id=None):
         """Exercise the real controller against a Kodi callback/event double."""
         state = SimpleNamespace(now=0.0, player=None, dialogs=[], subtitles=[], visibility=[], seeks=[],
@@ -502,6 +560,7 @@ class ControllerTests(unittest.TestCase):
                                 profile_dir=getattr(self, "profile_dir", None) or tempfile.mkdtemp())
         pending = list(events)
         polling_thread = threading.get_ident()
+        test = self
 
         class KodiPlayer:
             def __init__(self):
@@ -510,6 +569,11 @@ class ControllerTests(unittest.TestCase):
                 self.playing = False
 
             def play(self, *args):
+                state.plays = getattr(state, "plays", []) + [args[0]]
+                if getattr(test, "fail_opens", 0):
+                    test.fail_opens -= 1
+                    self.onPlayBackError()
+                    return
                 self.playing = True
                 self.onAVStarted()
 
@@ -555,6 +619,12 @@ class ControllerTests(unittest.TestCase):
             def setAudioStream(self, index):
                 state.audio_selected.append(index)
 
+            def pause(self):
+                state.pauses = getattr(state, "pauses", 0) + 1
+
+            def getTotalTime(self):
+                return 0.0
+
         class Monitor:
             def waitForAbort(self, seconds):
                 # Yield to the real reporter thread; production Monitor does so.
@@ -597,23 +667,37 @@ class ControllerTests(unittest.TestCase):
                 state.listitem_props["<content_lookup>"] = value
 
         windows = getattr(self, "platform_windows", False)
-        xbmc = SimpleNamespace(Player=KodiPlayer, Monitor=Monitor,
+        conditions = getattr(self, "conditions", set())
+        state.notices = []
+        xbmc = SimpleNamespace(Player=KodiPlayer, Monitor=Monitor, executebuiltin=lambda command: None,
                                log=lambda message, level: state.logs.append(message), LOGWARNING=2, LOGINFO=1,
-                               getCondVisibility=lambda name: windows and name == "System.Platform.Windows")
-        xbmcgui = SimpleNamespace(ListItem=ListItem, Dialog=lambda: SimpleNamespace(ok=lambda *args: state.dialogs.append(args)))
+                               getCondVisibility=lambda name: name in conditions or (
+                                   windows and name == "System.Platform.Windows"))
+        xbmcgui = SimpleNamespace(ListItem=ListItem, Dialog=lambda: SimpleNamespace(
+            ok=lambda *args: state.dialogs.append(args),
+            notification=lambda heading, message, **kwargs: state.notices.append(message)))
         addon = SimpleNamespace(getSetting=lambda key: "", getAddonInfo=lambda key: "0.2.1")
         xbmcvfs = SimpleNamespace(translatePath=lambda path: state.profile_dir)
         with patch.dict(sys.modules, {"xbmc": xbmc, "xbmcgui": xbmcgui, "xbmcvfs": xbmcvfs}), \
                 patch("silo.playback.time.monotonic", side_effect=lambda: state.now):
             controller = PlaybackController(client, addon)
-            controller.play({"file_id": "default-file", "title": "A title"},
-                            start_position=start, file_id=file_id,
-                            options=options or {"progress_interval": 10, "subtitle_mode": "server"})
+            state.controller = controller
+            if getattr(self, "configure", None):
+                self.configure(controller, state)
+            extras = getattr(self, "fake_extras", None)
+            with patch.object(PlaybackController, "_extras",
+                              (lambda *args, **kwargs: extras) if extras is not None else PlaybackController._extras):
+                controller.play({"file_id": "default-file", "title": "A title"},
+                                start_position=start, file_id=file_id,
+                                options=options or {"progress_interval": 10, "subtitle_mode": "server"},
+                                exact_start=getattr(self, "exact_start", False))
             state.result = controller.last_result
             if controller.last_reporter:
                 self.assertTrue(controller.last_reporter.wait(1), "Reporter did not finish")
         return state
 
+
+class ControllerTests(KodiHarness):
     def test_resume_waits_for_seek_then_stop_uses_cached_sample_without_native_callback_reads(self):
         client = FakeClient(playable_decision(source_start=180, player_start=180))
         state = self.run_player(client, [(0, None), (0.2, None), (180.1, None), (180.6, "stop")], start=180)
@@ -1111,6 +1195,35 @@ class ProgressReporterTests(unittest.TestCase):
         self.assertEqual(client.calls[-1][2]["position"], 12)
 
 
+class ReporterHoldTests(unittest.TestCase):
+    def test_a_deliberate_block_is_not_a_stalled_owner(self):
+        now = [0.0]
+        client = FakeClient()
+        session = PlaybackSession(client)
+        session.start("file-a")
+        reporter = ProgressReporter(session, interval=10, clock=lambda: now[0], owner_timeout=5, startup_timeout=30)
+        reporter.submit(1, False)
+        reporter.hold()
+        now[0] = 120.0
+        time.sleep(0.4)
+        self.assertFalse(reporter.status()[2])
+        reporter.release()
+        now[0] = 140.0  # Still inside the restarted startup window.
+        time.sleep(0.4)
+        self.assertFalse(reporter.status()[2])
+        now[0] = 151.0
+        self.assertTrue(reporter.wait(2))
+        self.assertEqual(reporter.status()[1], "controller_stalled")
+
+    def test_samples_carry_their_own_timeline_offset(self):
+        client = FakeClient(hls_decision("server_remux_hls", source_start=120, origin=118))
+        session = PlaybackSession(client)
+        session.start("42", 120)
+        session.progress(5, False, 300)
+        self.assertEqual(client.calls[-1][2]["position"], 305)
+        session.progress(5, False)
+        self.assertEqual(client.calls[-1][2]["position"], 123)
+
 class KodiMediaUrlTests(unittest.TestCase):
     def test_invalid_ports_and_parser_controls_are_reported_as_playback_errors(self):
         for value in ("https://silo.invalid:bad/file", "https://silo.invalid:99999/file",
@@ -1150,6 +1263,447 @@ class KodiMediaUrlTests(unittest.TestCase):
         for stream in bad_streams:
             with self.subTest(stream=stream), self.assertRaises(PlaybackError):
                 kodi_media_url("https://silo.invalid", stream)
+
+
+REPLAN_REQUIRED = ("protocol_version", "playback_attempt_id", "replan_request_id", "failed_plan_id",
+                   "plan_attempt_id", "plan_attempt_key", "attempt_count", "client_capabilities",
+                   "client_playback_context", "installation_id")
+
+
+def assert_replan_body(case, body, operation):
+    """The server's ReplanRequestV3 rules (replan-request.schema.json) plus v2's installation_id."""
+    for key in REPLAN_REQUIRED:
+        case.assertIn(key, body)
+    case.assertEqual(body["protocol_version"], 3)
+    case.assertEqual(body["operation"], operation)
+    case.assertRegex(body["replan_request_id"], r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
+    case.assertTrue(body["plan_attempt_key"].startswith("v3:"))
+    case.assertTrue(1 <= body["attempt_count"] <= 8)
+    case.assertGreaterEqual(len(body["plan_attempt_id"]), 8)
+    if operation in ("failure_recovery", "seek_failure_recovery"):
+        case.assertTrue(body["failure"]["classification"])
+    else:
+        case.assertNotIn("failure", body)
+    if operation == "quality_change":
+        case.assertTrue(body["quality_preference"].strip())
+    assert_contract(case, body["client_capabilities"], "ClientCodecCapabilitiesV3")
+    assert_contract(case, body["client_playback_context"], "ClientPlaybackContextV3")
+
+
+def replans(client):
+    return [body for _, path, body in client.calls if path.endswith("/replan")]
+
+
+class ConvertedSessionTests(unittest.TestCase):
+    def test_converted_hls_plan_is_accepted_with_honest_start_body(self):
+        client = FakeClient(hls_decision())
+        session = PlaybackSession(client, options={"max_bitrate": 8000, "quality_preference": "1080p"})
+        plan = session.start("42", 0)
+        self.assertEqual(plan["delivery"], "server_transcode_hls")
+        body = next(body for _, path, body in client.calls if path == "/playback/start")
+        assert_contract(self, body, "PlaybackStartBody")
+        self.assertEqual(body["bandwidth_cap_kbps"], 8000)
+        self.assertEqual(body["quality_preference"], "1080p")
+        hls = body["client_playback_context"]["deliveries"]["hls"]
+        self.assertTrue(hls["enabled"] and hls["supported_on_device"])
+        self.assertFalse(body["client_playback_context"]["deliveries"]["progressive"]["enabled"])
+        self.assertTrue(session.can_replan())
+
+    def test_no_bitrate_limit_sends_no_cap_and_defaults_to_auto_quality(self):
+        for value in (0, None, True, -5, "8000"):
+            with self.subTest(value=value):
+                client = FakeClient()
+                PlaybackSession(client, options={"max_bitrate": value}).start("f")
+                body = client.calls[-1][2]
+                self.assertNotIn("bandwidth_cap_kbps", body)
+                self.assertEqual(body["quality_preference"], "auto")
+
+    def test_progressive_remux_and_unknown_deliveries_are_refused(self):
+        for delivery in ("server_remux_progressive", "hls", ""):
+            with self.subTest(delivery=delivery):
+                decision = hls_decision()
+                decision["playback_plan"]["delivery"] = delivery
+                with self.assertRaises(PlaybackError):
+                    PlaybackSession(FakeClient(decision)).start("42")
+
+    def test_server_offering_only_hls_is_still_usable(self):
+        client = FakeClient(hls_decision())
+        client.capabilities["deliveries"] = ["server_transcode_hls"]
+        PlaybackSession(client).start("42")
+
+    def test_growing_remux_timeline_reports_source_positions(self):
+        client = FakeClient(hls_decision("server_remux_hls", source_start=120, origin=118.5))
+        session = PlaybackSession(client)
+        plan = session.start("42", 120)
+        self.assertTrue(server_anchored(plan))
+        self.assertEqual(plan["timeline"]["player_start_seconds"], 1.5)
+        session.progress(10)
+        self.assertEqual(client.calls[-1][2]["position"], 128.5)
+        self.assertEqual(plan_duration(plan), 3000 - 118.5)
+        self.assertFalse(server_anchored(hls_decision()["playback_plan"]))
+        self.assertIsNone(plan_duration(playable_decision()["playback_plan"]))
+        self.assertEqual(effective_file_id(plan, "requested"), "42")
+        self.assertEqual(effective_file_id({}, "requested"), "requested")
+
+    def test_quality_change_is_an_intent_replan_with_the_menu_label(self):
+        client = FakeClient(hls_decision())
+        session = PlaybackSession(client, options={"max_bitrate": 20000})
+        session.start("42", 0)
+        start = next(body for _, path, body in client.calls if path == "/playback/start")
+        client.replans = [hls_decision(plan_id="plan:transcode-0002", key="v3:transcode0002")]
+        plan = session.replan("quality_change", position=61.5, quality="1080p-medium")
+        body = replans(client)[0]
+        assert_replan_body(self, body, "quality_change")
+        self.assertEqual(client.calls[-1][1], "/playback/" + SESSION + "/replan")
+        self.assertEqual(body["quality_preference"], "1080p-medium")
+        self.assertEqual(body["position_seconds"], 61.5)
+        self.assertEqual(body["failed_plan_id"], "plan:transcode-0001")
+        self.assertEqual(body["plan_attempt_key"], "v3:transcode0001")
+        self.assertEqual(body["playback_attempt_id"], start["playback_attempt_id"])
+        self.assertEqual(body["installation_id"], start["installation_id"])
+        self.assertEqual(body["bandwidth_cap_kbps"], 20000)
+        self.assertEqual(body["attempt_count"], 1)
+        self.assertNotIn("attempted_plan_keys", body)
+        self.assertNotIn("selected_tracks", body)
+        self.assertEqual(plan["plan_id"], "plan:transcode-0002")
+        self.assertEqual(session.quality_preference, "1080p-medium")
+        # The next replan addresses the plan the server now holds.
+        client.replans = [hls_decision(plan_id="plan:transcode-0003", key="v3:transcode0003")]
+        session.replan("quality_change", position=70, quality="auto")
+        second = replans(client)[1]
+        self.assertEqual(second["failed_plan_id"], "plan:transcode-0002")
+        self.assertNotEqual(second["plan_attempt_id"], body["plan_attempt_id"])
+
+    def test_track_change_names_the_audio_index_and_keeps_the_current_subtitle(self):
+        decision = hls_decision()
+        decision["playback_plan"]["subtitle"] = {"mode": "render", "track_id": "file:42:subtitle:0",
+                                                 "inventory": [{"track_id": "file:42:subtitle:0"}]}
+        client = FakeClient(decision)
+        session = PlaybackSession(client)
+        session.start("42", 0)
+        client.replans = [hls_decision(plan_id="plan:transcode-0002", key="v3:transcode0002")]
+        session.replan("track_change", position=12, audio_index=2)
+        body = replans(client)[0]
+        assert_replan_body(self, body, "track_change")
+        self.assertEqual(body["selected_tracks"], {"audio": {"index": 2}, "subtitle": {"id": "file:42:subtitle:0"}})
+        self.assertEqual(body["quality_preference"], "auto")
+
+    def test_track_change_without_subtitles_keeps_them_off(self):
+        client = FakeClient(hls_decision())
+        session = PlaybackSession(client)
+        session.start("42", 0)
+        client.replans = [hls_decision(plan_id="plan:transcode-0002", key="v3:transcode0002")]
+        session.replan("track_change", position=12, audio_index=0)
+        self.assertEqual(replans(client)[0]["selected_tracks"], {"audio": {"index": 0}})
+
+    def test_terminal_replan_keeps_the_playing_plan(self):
+        client = FakeClient(hls_decision())
+        session = PlaybackSession(client)
+        session.start("42", 0)
+        client.replans = [{"protocol_version": 3, "outcome": "adaptation_unavailable",
+                           "terminal": {"reason": "conversion_tool_unavailable", "message": "No encoder is free.",
+                                        "retryable": True}}]
+        with self.assertRaisesRegex(PlaybackError, "No encoder is free"):
+            session.replan("quality_change", position=5, quality="720p-low")
+        self.assertEqual(session.plan["plan_id"], "plan:transcode-0001")
+        self.assertEqual(session.quality_preference, "auto")
+
+    def test_failure_recovery_sends_the_loop_guard_and_refuses_a_repeat(self):
+        client = FakeClient(hls_decision())
+        session = PlaybackSession(client)
+        session.start("42", 0)
+        client.replans = [hls_decision(plan_id="plan:transcode-0002", key="v3:transcode0002")]
+        session.replan("failure_recovery", position=3, classification="player_open_failed")
+        body = replans(client)[0]
+        assert_replan_body(self, body, "failure_recovery")
+        self.assertEqual(body["attempted_plan_keys"], ["v3:transcode0001"])
+        self.assertEqual(body["failure"], {"classification": "player_open_failed"})
+        client.replans = [hls_decision(plan_id="plan:transcode-0001", key="v3:transcode0001")]
+        with self.assertRaisesRegex(PlaybackError, "already failed"):
+            session.replan("failure_recovery", position=3, classification="player_open_failed")
+        second = replans(client)[1]
+        self.assertEqual(second["attempted_plan_keys"], ["v3:transcode0001", "v3:transcode0002"])
+        self.assertEqual(second["attempt_count"], 2)
+
+    def test_seek_reanchor_is_not_a_failure(self):
+        client = FakeClient(hls_decision("server_remux_hls"))
+        session = PlaybackSession(client)
+        session.start("42", 0)
+        client.replans = [hls_decision("server_remux_hls", source_start=900, origin=897)]
+        plan = session.replan("seek_reanchor", position=900)
+        body = replans(client)[0]
+        assert_replan_body(self, body, "seek_reanchor")
+        self.assertNotIn("attempted_plan_keys", body)
+        self.assertEqual(body["position_seconds"], 900)
+        self.assertEqual(plan["timeline"]["timeline_offset_seconds"], 897)
+
+    def test_plans_without_identity_cannot_be_changed(self):
+        session = PlaybackSession(FakeClient())
+        session.start("f")
+        self.assertFalse(session.can_replan())
+        with self.assertRaises(PlaybackError):
+            session.replan("quality_change", quality="720p-low")
+
+    def test_resume_rewind_backs_up_but_never_below_zero(self):
+        self.assertEqual(rewound_start(180, 7), 173)
+        self.assertEqual(rewound_start(3, 7), 0)
+        self.assertEqual(rewound_start(180, 0), 180)
+        self.assertEqual(rewound_start(0, 7), 0)
+        self.assertIsNone(rewound_start(None, 7))
+        self.assertEqual(rewound_start(180, True), 180)
+
+
+class ScriptedExtras:
+    """Stands in for PlaybackExtras: returns one scripted command per tick."""
+
+    def __init__(self, commands=()):
+        self.commands = list(commands)
+        self.plans, self.interactions, self.closed = [], 0, False
+
+    def tick(self, position, paused=False, total=None):
+        return self.commands.pop(0) if self.commands else None
+
+    def update_plan(self, plan, quality=None):
+        self.plans.append((plan, quality))
+
+    def interaction(self):
+        self.interactions += 1
+
+    def close(self):
+        self.closed = True
+
+
+def steady(start, count, step=0.25):
+    """Natural playback samples after a switch, past the stale-callback window."""
+    return [(start + step * index, None) for index in range(1, count + 1)]
+
+
+class ConvertedControllerTests(KodiHarness):
+    def tearDown(self):
+        PlaybackController.streak.reset()
+        for name in ("fake_extras", "configure", "conditions", "fail_opens", "exact_start"):
+            self.__dict__.pop(name, None)
+
+    def test_transcode_plays_natively_without_selecting_audio_streams(self):
+        self.audio_streams = ["aac stereo"]
+        try:
+            client = FakeClient(hls_decision())
+            state = self.run_player(client, [(1, None), (2, "stop")], start=0)
+        finally:
+            del self.audio_streams
+        self.assertEqual(state.dialogs, [])
+        self.assertEqual(state.plays, ["https://silo.invalid/api/v2/playback/transcode/%s/master.m3u8?st=opaque"
+                                       % SESSION])
+        self.assertEqual(state.listitem_props["<mime>"], "application/vnd.apple.mpegurl")
+        self.assertNotIn("inputstream", state.listitem_props)
+        self.assertEqual(state.audio_selected, [])
+        self.assertEqual(client.calls[-1][0], "DELETE")
+
+    def test_inputstream_adaptive_is_used_when_installed_and_enabled(self):
+        self.conditions = {"System.HasAddon(inputstream.adaptive)", "System.AddonIsEnabled(inputstream.adaptive)"}
+        state = self.run_player(FakeClient(hls_decision()), [(1, None), (2, "stop")], start=0)
+        self.assertEqual(state.listitem_props["inputstream"], "inputstream.adaptive")
+        self.assertEqual(state.listitem_props["inputstream.adaptive.play_timeshift_buffer"], "true")
+        self.assertNotIn("|", state.plays[0])
+
+    def test_direct_play_never_uses_inputstream_adaptive(self):
+        self.conditions = {"System.HasAddon(inputstream.adaptive)", "System.AddonIsEnabled(inputstream.adaptive)"}
+        state = self.run_player(FakeClient(), [(1, None), (2, "stop")], start=0)
+        self.assertNotIn("inputstream", state.listitem_props)
+
+    def test_adaptive_open_failure_falls_back_to_kodis_own_hls_player(self):
+        self.conditions = {"System.HasAddon(inputstream.adaptive)", "System.AddonIsEnabled(inputstream.adaptive)"}
+        self.fail_opens = 1
+        client = FakeClient(hls_decision())
+        state = self.run_player(client, [(1, None), (2, "stop")], start=0)
+        self.assertEqual(len(state.plays), 2)
+        self.assertEqual(replans(client), [])
+        self.assertTrue(any("adaptive_open_failed" in line for line in state.logs))
+        self.assertEqual(state.dialogs, [])
+
+    def test_open_failure_asks_the_server_for_another_route(self):
+        self.fail_opens = 1
+        decision = hls_decision()
+        decision["playback_plan"]["delivery"] = "original_http"
+        decision["playback_plan"]["stream"] = {"url": "/api/v2/stream/%s?st=opaque" % SESSION,
+                                               "protocol": "http_progressive", "headers": {},
+                                               "header_refresh": "none"}
+        client = FakeClient(decision)
+        client.replans = [hls_decision(plan_id="plan:transcode-0002", key="v3:transcode0002")]
+        state = self.run_player(client, [(1, None), (2, "stop")], start=0)
+        body = replans(client)[0]
+        assert_replan_body(self, body, "failure_recovery")
+        self.assertEqual(body["attempted_plan_keys"], ["v3:transcode0001"])
+        self.assertEqual(len(state.plays), 2)
+        self.assertIn("master.m3u8", state.plays[1])
+        self.assertEqual(state.dialogs, [])
+
+    def test_open_failure_without_plan_identity_keeps_the_original_error(self):
+        self.fail_opens = 1
+        state = self.run_player(FakeClient(), [(1, None)], start=0)
+        self.assertIn("could not open the original media file", state.dialogs[0][1])
+
+    def test_quality_choice_replans_and_switches_at_the_current_position(self):
+        self.fake_extras = ScriptedExtras([{"replan": "quality", "quality": "1080p-medium"}])
+        client = FakeClient(hls_decision())
+        client.replans = [hls_decision(source_start=10, plan_id="plan:transcode-0002", key="v3:transcode0002")]
+        events = [(10, None)] + steady(10, 14) + [(14, "stop")]
+        state = self.run_player(client, events, start=0)
+        body = replans(client)[0]
+        assert_replan_body(self, body, "quality_change")
+        self.assertEqual(body["quality_preference"], "1080p-medium")
+        self.assertEqual(body["position_seconds"], 10)
+        self.assertEqual(len(state.plays), 2)
+        self.assertEqual(state.seeks, [10])
+        self.assertEqual(self.fake_extras.plans[-1][1], "1080p-medium")
+        self.assertEqual(self.fake_extras.plans[-1][0]["plan_id"], "plan:transcode-0002")
+        self.assertEqual(client.calls[-1][0], "DELETE")
+        self.assertEqual(state.dialogs, [])
+
+    def test_refused_quality_change_keeps_playing_and_says_why(self):
+        self.fake_extras = ScriptedExtras([{"replan": "quality", "quality": "720p-low"}])
+        client = FakeClient(hls_decision())
+        client.replans = [{"protocol_version": 3, "outcome": "adaptation_unavailable",
+                           "terminal": {"reason": "conversion_tool_unavailable", "message": "No encoder is free."}}]
+        state = self.run_player(client, [(10, None), (10.25, None), (10.5, "stop")], start=0)
+        self.assertEqual(len(state.plays), 1)
+        self.assertEqual(state.notices, ["No encoder is free."])
+        self.assertEqual(client.calls[-1][2]["position"], 10.25)
+
+    def test_ended_session_during_a_change_stops_with_a_message(self):
+        self.fake_extras = ScriptedExtras([{"replan": "quality", "quality": "720p-low"}])
+        client = FakeClient(hls_decision())
+        client.replans = [ApiError(404, "Gone", "playback_session_not_found")]
+        state = self.run_player(client, [(10, None), (10.25, None)], start=0)
+        self.assertIn("session ended", state.dialogs[0][1])
+
+    def test_audio_track_change_on_a_converted_stream_is_a_track_change_replan(self):
+        self.fake_extras = ScriptedExtras([{"replan": "track", "audio_index": 0}])
+        client = FakeClient(hls_decision())
+        replacement = hls_decision(source_start=20, plan_id="plan:transcode-0002", key="v3:transcode0002")
+        replacement["playback_plan"]["selected_tracks"] = {"audio": {"id": "file:42:audio:0", "index": 0}}
+        client.replans = [replacement]
+        events = [(20, None)] + steady(20, 14) + [(24, "stop")]
+        state = self.run_player(client, events, start=0)
+        body = replans(client)[0]
+        assert_replan_body(self, body, "track_change")
+        self.assertEqual(body["selected_tracks"], {"audio": {"index": 0}})
+        self.assertEqual(body["position_seconds"], 20)
+        self.assertEqual(len(state.plays), 2)
+
+    def test_seek_inside_a_growing_remux_is_reanchored_by_the_server(self):
+        self.fake_extras = ScriptedExtras()
+        client = FakeClient(hls_decision("server_remux_hls", plan_id="plan:remux-0001", key="v3:remux0001"))
+        client.replans = [hls_decision("server_remux_hls", source_start=600, origin=596,
+                                       plan_id="plan:remux-0002", key="v3:remux0002")]
+        events = [(1, None), (1.25, None), (600, None)] + steady(4, 14) + [(7.5, "stop")]
+        state = self.run_player(client, events, start=0)
+        body = replans(client)[0]
+        assert_replan_body(self, body, "seek_reanchor")
+        self.assertEqual(body["position_seconds"], 600)
+        self.assertEqual(state.seeks, [4])
+        samples = [body["position"] for _, path, body in client.calls if path.endswith("/progress")]
+        self.assertTrue(all(position < 2 or position >= 600 for position in samples))
+        self.assertEqual(client.calls[-1][2]["position"], 7.5 + 596)
+        self.assertEqual(state.result["position_seconds"], 7.5 + 596)
+        self.assertGreaterEqual(self.fake_extras.interactions, 1)
+
+    def test_seek_on_a_complete_timeline_stays_local(self):
+        self.fake_extras = ScriptedExtras()
+        client = FakeClient(hls_decision())
+        state = self.run_player(client, [(1, None), (1.25, None), (600, None), (600.25, "stop")], start=0)
+        self.assertEqual(replans(client), [])
+        self.assertEqual(client.calls[-1][2]["position"], 600)
+
+    def subtitle_tool(self, screen, result):
+        calls = []
+
+        def configure(controller, state):
+            def open_screen(name, **kwargs):
+                calls.append((name, kwargs))
+                return result
+            controller.open_screen = open_screen
+
+        command = {"screen": screen}
+        if screen == "subtitle_sync":
+            command["subtitle"] = {"track_id": "file:42:subtitle:0", "sync_key": "external-abc", "url": "/x.vtt"}
+        self.configure = configure
+        self.fake_extras = ScriptedExtras([command])
+        client = FakeClient(hls_decision())
+        state = self.run_player(client, [(30, None), (30.25, None), (30.5, "stop")], start=0)
+        return calls, state
+
+    def test_subtitle_sync_pauses_opens_the_tool_and_loads_its_file(self):
+        calls, state = self.subtitle_tool("subtitle_sync", "/profile/subtitles/silo-subtitle-synced.srt")
+        name, kwargs = calls[0]
+        self.assertEqual(name, "subtitle_sync")
+        self.assertEqual(kwargs["file_id"], "42")
+        self.assertEqual(kwargs["item"]["title"], "A title")
+        self.assertEqual(kwargs["plan"]["plan_id"], "plan:transcode-0001")
+        self.assertEqual(kwargs["subtitle"]["sync_key"], "external-abc")
+        self.assertEqual(state.subtitles, ["/profile/subtitles/silo-subtitle-synced.srt"])
+        self.assertEqual(state.visibility[-1], True)
+        self.assertEqual(state.pauses, 2)  # Paused for the dialog, resumed after.
+        self.assertEqual(state.controller.loaded_subtitle, "/profile/subtitles/silo-subtitle-synced.srt")
+        self.assertEqual(state.dialogs, [])
+
+    def test_translate_gets_the_source_position_and_search_none_loads_nothing(self):
+        calls, state = self.subtitle_tool("subtitle_translate", None)
+        self.assertEqual(calls[0][1]["position"], 30)
+        self.assertNotIn("subtitle", calls[0][1])
+        self.assertEqual(state.subtitles, [])
+        calls, state = self.subtitle_tool("subtitle_search", None)
+        self.assertEqual(set(calls[0][1]), {"item", "file_id", "plan"})
+
+    def test_subtitle_tool_without_an_application_hook_only_notifies(self):
+        self.fake_extras = ScriptedExtras([{"screen": "subtitle_search"}])
+        state = self.run_player(FakeClient(hls_decision()), [(30, None), (30.25, "stop")], start=0)
+        self.assertEqual(len(state.notices), 1)
+        self.assertFalse(getattr(state, "pauses", 0))
+
+    def test_resume_backs_up_by_the_rewind_setting(self):
+        client = FakeClient(playable_decision(source_start=173, player_start=173))
+        self.run_player(client, [(173, None), (174, "stop")], start=180,
+                        options={"resume_rewind": 7, "subtitle_mode": "server"})
+        body = next(body for _, path, body in client.calls if path == "/playback/start")
+        self.assertEqual(body["start_position"], 173)
+
+    def test_explicit_start_positions_are_not_rewound(self):
+        self.exact_start = True
+        client = FakeClient(playable_decision(source_start=180, player_start=180))
+        self.run_player(client, [(180, None), (181, "stop")], start=180,
+                        options={"resume_rewind": 7, "subtitle_mode": "server"})
+        body = next(body for _, path, body in client.calls if path == "/playback/start")
+        self.assertEqual(body["start_position"], 180)
+
+    def test_start_over_and_server_resume_are_not_rewound(self):
+        for start in (0, None):
+            with self.subTest(start=start):
+                client = FakeClient()
+                self.run_player(client, [(1, None), (2, "stop")], start=start,
+                                options={"resume_rewind": 30, "subtitle_mode": "server"})
+                body = next(body for _, path, body in client.calls if path == "/playback/start")
+                self.assertEqual(body.get("start_position"), start)
+
+    def test_unattended_up_next_keeps_the_streak_across_controllers(self):
+        PlaybackController.streak.count = 2
+        self.fake_extras = ScriptedExtras([{"stop": "next", "item": {"content_id": "e2"}, "auto": True}])
+        state = self.run_player(FakeClient(), [(1, None), (2, None)], start=0)
+        self.assertEqual(state.controller.next_action["auto"], True)
+        self.assertEqual(PlaybackController.streak.count, 2)
+
+    def test_any_other_ending_resets_the_streak(self):
+        for command in ({"stop": "next", "item": {"content_id": "e2"}, "auto": False}, {"stop": "sleep"}, None):
+            with self.subTest(command=command):
+                PlaybackController.streak.count = 2
+                self.fake_extras = ScriptedExtras([command] if command else [])
+                self.run_player(FakeClient(), [(1, None), (2, "stop")], start=0)
+                self.assertEqual(PlaybackController.streak.count, 0)
+
+    def test_pause_and_resume_count_as_interaction(self):
+        self.fake_extras = ScriptedExtras()
+        self.run_player(FakeClient(), [(1, None), (1.25, "pause"), (1.25, "resume"), (1.5, "stop")], start=0)
+        self.assertEqual(self.fake_extras.interactions, 2)
 
 
 if __name__ == "__main__":

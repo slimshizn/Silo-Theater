@@ -6,19 +6,20 @@ Silo Theater is a community project. It is not an official Silo app and is not m
 
 ## Features
 
-- Sign in with an activation code or username and password.
-- Choose household profiles, including PIN-protected profiles.
-- Home rows in your server's order, with a hero that follows the title you focus.
-- Movies and Series grids with library and sort choices, and search.
-- Title details with seasons, an episode rail, cast and related titles.
-- Skip Intro, Skip Recap and Skip Credits buttons from your server's markers, with your profile's auto-skip settings.
-- Up next at the end of an episode, with a 10-second countdown.
-- A Silo player menu during playback: info, stats, version, speed, aspect, sleep timer, audio, subtitles and chapters.
-- Silo Settings for your profile (auto-skip, languages, subtitles, quality) and this device.
-- Select a movie or episode's media file by filename, edition and format.
-- Resume movies and episodes from their saved position and sync progress with Silo.
-- Customize resume behavior, file selection, browsing and playback preferences.
-- Configure resolution, HDR10, Dolby Vision or P7 FEL capabilities for supported devices.
+- Sign in with an activation code or username and password, or create an account when your server allows it.
+- Choose household profiles, including PIN-protected ones, and manage profiles (names, avatars, PINs, kid limits).
+- Home rows in your server's order, with a hero that follows the title you focus; reorder or hide rows; remove titles from Continue Watching.
+- Movies and Series grids with library, sort, filters (genre, decade, watch status, rating, resolution, HDR, studio, network, country), an A–Z jump and Shuffle; each library's Recommended rows and Collections.
+- For You, Calendar and, when your server offers it, Requests (search, request, Notify me).
+- Search with people; person pages with filmography.
+- Title details with seasons, an episode rail, cast, trailers and extras, related titles and a facts table; Watchlist, Favorite, Mark watched, Go to series and Shuffle.
+- Watchlist, Favorites and History screens.
+- Plays original files directly, and titles your device cannot play as converted HLS streams from your server; choose the quality during playback.
+- Skip Intro, Skip Recap and Skip Credits from your server's markers, with your profile's auto-skip settings.
+- Up next with a countdown, Are you still watching?, and rewind when resuming.
+- A Silo player menu during playback: info, stats, version, quality, speed, aspect, sleep timer, audio, subtitles (including online search, AI translation and sync to audio) and chapters.
+- Silo Settings for your profile and this device; switch between several Silo servers.
+- Widgets for Kodi's own home screen: your Silo rows, Watchlist and Favorites.
 
 ## Install in Kodi
 
@@ -45,11 +46,11 @@ make build
 make repository
 ```
 
-`make build` creates `dist/script.silo-0.4.1.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
+`make build` creates `dist/script.silo-0.5.0.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
-Version **0.4.1** supports **original HTTP direct play**. Titles that require remuxing or transcoding may be refused, and quality switching is not available.
+Version **0.5.0** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** in Settings to limit converted streams.
 
 ### During playback
 

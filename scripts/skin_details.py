@@ -48,8 +48,12 @@ def visible(condition):
 
 # ------------------------------------------------------------------ buttons
 # (id, kind, icon, visible, enabled). Order is the on-screen order; the Python
-# layout (ui_details.BUTTON_ORDER) uses the same order.
+# layout (ui_details.BUTTON_ORDER) uses the same order. An icon is a texture,
+# ("swap", idle texture, on texture, property) for a toggle drawn filled when
+# the property is set, or ("glyph", text, property) for a text symbol that is
+# dim until the property is set (property None: always full).
 ENABLED = has("silo.has_file")
+MARKS = has("silo.marks")
 BUTTONS = (
     (105, "capsule", "icon_play.png", has("silo.continue"), None),
     (100, "capsule", "icon_play.png", has("silo.playable"), ENABLED),
@@ -57,6 +61,9 @@ BUTTONS = (
     (104, "circle", "icon_restart.png", has("silo.resume"), ENABLED),
     (103, "circle", "icon_versions.png", has("silo.multi_version"), ENABLED),
     (106, "circle", "icon_subtitles.png", has("silo.playable") + " + " + has("silo.has_subtitles"), None),
+    (107, "circle", ("swap", "icon_bookmark.png", "icon_bookmark_filled.png", "silo.in_watchlist"), MARKS, None),
+    (108, "circle", ("swap", "icon_heart.png", "icon_heart_filled.png", "silo.favorite"), MARKS, None),
+    (109, "circle", "icon_more.png", MARKS, None),
 )
 BUTTON_LABELS = {105: "silo.continue_label", 100: "silo.play_label"}
 
@@ -69,6 +76,35 @@ def nav(control_id, direction, candidates):
     links = "".join('<{0} condition="{1}">{2}</{0}>'.format(direction, reachable(target), target)
                     for target in candidates)
     return links + "<{0}>{1}</{0}>".format(direction, control_id)
+
+
+def icon_controls(icon, left, focused):
+    """The icon drawn on a button: white when idle, black when the button has focus."""
+    unfocused = "!" + focused
+    if isinstance(icon, str):
+        return [image(left, 18, 40, 40, "<texture>{}</texture>".format(icon), visible(unfocused)),
+                image(left, 18, 40, 40, '<texture colordiffuse="FF000000">{}</texture>'.format(icon),
+                      visible(focused))]
+    if icon[0] == "swap":
+        _, idle, on, name = icon
+        result = []
+        for texture, state in ((idle, "String.IsEmpty({})".format(prop(name))), (on, has(name))):
+            result.append(image(left, 18, 40, 40, "<texture>{}</texture>".format(texture),
+                                visible(unfocused + " + " + state)))
+            result.append(image(left, 18, 40, 40, '<texture colordiffuse="FF000000">{}</texture>'.format(texture),
+                                visible(focused + " + " + state)))
+        return result
+    _, text, name = icon
+    centered = "<align>center</align><aligny>center</aligny>"
+    if name is None:
+        states = (("", TEXT),)
+    else:
+        states = ((" + String.IsEmpty({})".format(prop(name)), "80EDEDED"), (" + " + has(name), TEXT))
+    result = []
+    for state, color in states:
+        result.append(label(0, 0, 76, 76, text, "font30_title", color, centered + visible(unfocused + state)))
+        result.append(label(0, 0, 76, 76, text, "font30_title", "FF000000", centered + visible(focused + state)))
+    return result
 
 
 def button(index):
@@ -92,16 +128,14 @@ def button(index):
             '<texturenofocus>circle_idle.png</texturenofocus>').format(TEXT)
         icon_left = 18
     focused = "Control.HasFocus({})".format(control_id)
-    return "\n".join((
+    return "\n".join([
         '      <control type="group" id="{}"><left>100</left><top>556</top><width>{}</width><height>76</height>{}'
         .format(1300 + control_id, width, visible(show)),
         '        <control type="button" id="{}"><left>0</left><top>0</top><width>{}</width><height>76</height>'
         '{}{}{}</control>'.format(control_id, width, body, links, gating),
-        "        " + image(icon_left, 18, 40, 40, "<texture>{}</texture>".format(icon), visible("!" + focused)),
-        "        " + image(icon_left, 18, 40, 40, '<texture colordiffuse="FF000000">{}</texture>'.format(icon),
-                           visible(focused)),
+    ] + ["        " + control for control in icon_controls(icon, icon_left, focused)] + [
         "      </control>",
-    ))
+    ])
 
 
 # -------------------------------------------------------------------- lists
@@ -241,6 +275,60 @@ def similar_section():
              self_links(540), similar_card(False), similar_card(True))
 
 
+def extra_card(focused):
+    parts = [
+        image(8, 8, 352, 198, '<texture border="16" colordiffuse="{}">round16.png</texture>'.format(PLACEHOLDER)),
+        image(8, 8, 352, 198, '<texture diffuse="mask_wide.png">$INFO[ListItem.Art(thumb)]</texture>'
+              '<aspectratio>scale</aspectratio>'),
+    ]
+    if focused:
+        parts.append(image(4, 4, 360, 206, '<texture border="24" colordiffuse="E6FFFFFF">ring16.png</texture>',
+                           visible("Control.HasFocus(560)")))
+        parts.append(label(8, 216, 352, 38, "$INFO[ListItem.Label]", "font27", TEXT, "<scroll>true</scroll>"))
+    else:
+        parts.append(label(8, 216, 352, 38, "$INFO[ListItem.Label]", "font27", SECONDARY))
+    parts.append(label(8, 254, 352, 30, "$INFO[ListItem.Label2]", "font12", MUTED))
+    return "".join(parts)
+
+
+def extras_section():
+    return (
+        '      <control type="group" id="5000"><left>0</left><top>1500</top><width>1920</width><height>380</height>{}\n'
+        "        {}\n"
+        '        <control type="list" id="560"><left>92</left><top>56</top><width>1828</width><height>300</height>'
+        '<orientation>horizontal</orientation><scrolltime tween="cubic" easing="out">200</scrolltime>{}\n'
+        '          <itemlayout width="384" height="300">{}</itemlayout>\n'
+        '          <focusedlayout width="384" height="300">{}</focusedlayout>\n'
+        '        </control>\n      </control>'
+    ).format(visible(has("silo.has_extras")), label(100, 0, 1200, 50, "Trailers &amp; More", "font36_title", TEXT),
+             self_links(560), extra_card(False), extra_card(True))
+
+
+def fact_row():
+    return "".join((
+        label(0, 0, 300, 46, "$INFO[ListItem.Label]", "font10", MUTED, "<aligny>center</aligny>"),
+        label(320, 0, 1080, 46, "$INFO[ListItem.Label2]", "font12", TEXT, "<aligny>center</aligny>"),
+        image(0, 45, 1400, 1, '<texture colordiffuse="14FFFFFF">white.png</texture>'),
+    ))
+
+
+def facts_section():
+    # A passive focus stop, as on Android: the whole table highlights, rows do not.
+    return (
+        '      <control type="group" id="6000"><left>0</left><top>1900</top><width>1920</width><height>660</height>{}\n'
+        "        {}\n"
+        "        {}\n"
+        '        <control type="list" id="570"><left>100</left><top>64</top><width>1400</width><height>552</height>'
+        "<orientation>vertical</orientation>{}\n"
+        '          <itemlayout width="1400" height="46">{}</itemlayout>\n'
+        '          <focusedlayout width="1400" height="46">{}</focusedlayout>\n'
+        '        </control>\n      </control>'
+    ).format(visible(has("silo.has_facts")), label(100, 0, 1200, 50, "Details", "font36_title", TEXT),
+             image(80, 52, 1440, 576, '<texture border="16" colordiffuse="0FFFFFFF">round16.png</texture>',
+                   visible("Control.HasFocus(570)")),
+             self_links(570), fact_row(), fact_row())
+
+
 # --------------------------------------------------------------------- hero
 def hero():
     title_visible = visible("String.IsEmpty({})".format(prop("silo.logo")))
@@ -284,7 +372,8 @@ def hero():
 
 def build():
     body = "\n".join([hero()] + [button(index) for index in range(len(BUTTONS))]
-                     + [season_list(), episode_list(), cast_section(), similar_section()])
+                     + [season_list(), episode_list(), cast_section(), extras_section(), similar_section(),
+                        facts_section()])
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         "<!-- Generated by scripts/skin_details.py; edit the script, not this file. -->\n"
@@ -296,7 +385,7 @@ def build():
         '    <control type="image"><left>0</left><top>0</top><width>1920</width><height>1080</height>'
         '<texture colordiffuse="FF040D0F">white.png</texture></control>\n'
         "    <!-- Python moves this group to scroll the page between focus zones. -->\n"
-        '    <control type="group" id="1000"><left>0</left><top>0</top><width>1920</width><height>2200</height>\n'
+        '    <control type="group" id="1000"><left>0</left><top>0</top><width>1920</width><height>3600</height>\n'
         "{}\n"
         "    </control>\n"
         "  </controls>\n"

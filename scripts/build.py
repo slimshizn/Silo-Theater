@@ -18,7 +18,8 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ROOT_FILES = frozenset({"addon.xml", "default.py", "LICENSE"})
+ROOT_FILES = frozenset({"addon.xml", "default.py", "widgets_entry.py", "LICENSE"})
+REQUIRED_ROOT_FILES = ("addon.xml", "default.py", "LICENSE")
 RESOURCE_SUFFIXES = frozenset(
     {".py", ".xml", ".po", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ttf", ".otf"}
 )
@@ -78,7 +79,7 @@ def validate_addon(root: Path) -> Dict[str, str]:
     still need validation in Kodi and against the intended Silo server.
     """
     root = Path(root).resolve()
-    for name in ROOT_FILES:
+    for name in REQUIRED_ROOT_FILES:
         if not (root / name).is_file():
             raise ValueError("Required package file is missing: {}".format(name))
 
@@ -105,6 +106,10 @@ def validate_addon(root: Path) -> Dict[str, str]:
     scripts = manifest.findall("./extension[@point='xbmc.python.script']")
     if len(scripts) != 1 or scripts[0].get("library") != "default.py":
         raise ValueError("The script entry point must be default.py")
+    for plugin in manifest.findall("./extension[@point='xbmc.python.pluginsource']"):
+        library = plugin.get("library", "")
+        if library not in ROOT_FILES or not (root / library).is_file():
+            raise ValueError("The widget plugin entry point is missing: {}".format(library))
     metadata = manifest.find("./extension[@point='xbmc.addon.metadata']")
     if metadata is None or metadata.findtext("license") != "AGPL-3.0-or-later":
         raise ValueError("The add-on license must be AGPL-3.0-or-later")

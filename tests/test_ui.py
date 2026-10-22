@@ -1,6 +1,7 @@
 """Exercise user journeys with Kodi adapters stubbed; no server or Kodi needed."""
 
 import importlib
+import os
 import sys
 import types
 import unittest
@@ -443,6 +444,61 @@ class ApplicationFlowTests(unittest.TestCase):
         self.app.profile = {}
         with self.assertRaises(ApiError):
             self.app.update_profile({"auto_skip_intro": True})
+
+    def test_each_server_keeps_its_own_session_and_adopts_the_old_one(self):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as folder:
+            self.app._profile_dir = lambda: folder
+            with open(os.path.join(folder, "session.json"), "w", encoding="utf-8") as handle:
+                json.dump({"server_url": "https://one.example.invalid", "access_token": "x"}, handle)
+            other = self.app._session_path("https://two.example.invalid")
+            self.assertTrue(os.path.exists(os.path.join(folder, "session.json")))
+            mine = self.app._session_path("https://one.example.invalid/")
+            self.assertFalse(os.path.exists(os.path.join(folder, "session.json")))
+            self.assertTrue(os.path.exists(mine))
+            self.assertNotEqual(mine, other)
+            self.app.remember_server("https://one.example.invalid")
+            self.app.remember_server("https://two.example.invalid")
+            self.app.remember_server("https://one.example.invalid")
+            self.assertEqual(self.app.known_servers(), ["https://one.example.invalid", "https://two.example.invalid"])
+
+    def test_switch_server_picks_a_remembered_server_or_adds_one(self):
+        self.app.client.server_url = "https://one.example.invalid"
+        self.app.known_servers = lambda: ["https://one.example.invalid", "https://two.example.invalid"]
+        self.app.dialog.select.return_value = 0
+        self.assertTrue(self.app.switch_server())
+        self.app.addon.setSetting.assert_called_with("server_url", "https://two.example.invalid")
+        self.assertIsNone(self.app.store)
+        self.app.dialog.select.return_value = 1
+        self.app.dialog.input.return_value = "https://three.example.invalid"
+        self.assertTrue(self.app.switch_server())
+        self.app.addon.setSetting.assert_called_with("server_url", "https://three.example.invalid")
+        self.app.dialog.select.return_value = -1
+        self.assertFalse(self.app.switch_server())
+
+    def test_profile_prompt_follows_the_setting_and_time_away(self):
+        settings = {"profile_select": "auto"}
+        self.app.addon.getSetting.side_effect = lambda key: settings.get(key, "")
+        self.assertFalse(self.app.profile_prompt_due())
+        settings["profile_select"] = "always"
+        self.assertTrue(self.app.profile_prompt_due())
+        settings["profile_select"] = "1h"
+        self.assertTrue(self.app.profile_prompt_due())  # never active before
+        self.app.mark_active()
+        self.assertFalse(self.app.profile_prompt_due())
+        self.app.store["last_active"] -= 2 * 3600
+        self.assertTrue(self.app.profile_prompt_due())
+
+    def test_deep_links_play_or_open_without_the_home_screen(self):
+        self.app._run = MagicMock()
+        self.app.run(["default.py", "play", "movie:1"])
+        self.assertEqual(self.app.deep_link, ("play", "movie:1"))
+        self.app.run(["default.py"])
+        self.assertIsNone(self.app.deep_link)
+        self.app.run(["default.py", "delete", "movie:1"])
+        self.assertIsNone(self.app.deep_link)
 
     def test_session_storage_failure_is_shown_inside_startup_error_handler(self):
         self.app.store = None

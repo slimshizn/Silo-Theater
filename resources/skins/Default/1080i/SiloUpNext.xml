@@ -21,7 +21,7 @@
     </control>
     <control type="label">
       <left>1512</left><top>736</top><width>290</width><height>30</height>
-      <font>font10</font><textcolor>B3EDEDED</textcolor><label>UP NEXT</label>
+      <font>font10</font><textcolor>B3EDEDED</textcolor><label>$INFO[Window.Property(silo.next_heading)]</label>
     </control>
     <control type="label">
       <left>1512</left><top>770</top><width>290</width><height>34</height>
@@ -40,7 +40,7 @@
     </control>
     <control type="button" id="200">
       <left>1168</left><top>940</top><width>300</width><height>64</height>
-      <label>Play now</label><font>font25_title</font><align>center</align><aligny>center</aligny>
+      <label>$INFO[Window.Property(silo.next_play)]</label><font>font25_title</font><align>center</align><aligny>center</aligny>
       <textcolor>FFEDEDED</textcolor><focusedcolor>FF0B0B0C</focusedcolor>
       <texturefocus border="28" colordiffuse="FFEDEDED">pill56.png</texturefocus>
       <texturenofocus border="28">pill56_idle.png</texturenofocus>
@@ -48,7 +48,7 @@
     </control>
     <control type="button" id="201">
       <left>1488</left><top>940</top><width>312</width><height>64</height>
-      <label>Hide</label><font>font25_title</font><align>center</align><aligny>center</aligny>
+      <label>$INFO[Window.Property(silo.next_hide)]</label><font>font25_title</font><align>center</align><aligny>center</aligny>
       <textcolor>FFEDEDED</textcolor><focusedcolor>FF0B0B0C</focusedcolor>
       <texturefocus border="28" colordiffuse="FFEDEDED">pill56.png</texturefocus>
       <texturenofocus border="28">pill56_idle.png</texturenofocus>

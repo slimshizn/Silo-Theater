@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Sign-in form driven by login.prompt_login. Control IDs 101-103 and 201-203 and the
      silo.allow_code / silo.allow_password / silo.sign_in_label / silo.login_message
-     properties are part of that controller's contract. -->
+     properties are part of that controller's contract. Button 204 ("Create an account",
+     ui_people.create_account) shows only while silo.allow_signup is set. -->
 <window type="dialog">
   <defaultcontrol always="true">101</defaultcontrol>
   <coordinates><system>1</system><width>1920</width><height>1080</height></coordinates>
@@ -17,7 +18,8 @@
 
     <control type="group">
       <left>1050</left><top>187</top>
-      <control type="image"><left>0</left><top>0</top><width>780</width><height>706</height><texture border="42" colordiffuse="FF1F1F1F">glass.png</texture></control>
+      <control type="image"><left>0</left><top>0</top><width>780</width><height>706</height><texture border="42" colordiffuse="FF1F1F1F">glass.png</texture><visible>String.IsEmpty(Window.Property(silo.allow_signup))</visible></control>
+      <control type="image"><left>0</left><top>0</top><width>780</width><height>790</height><texture border="42" colordiffuse="FF1F1F1F">glass.png</texture><visible>!String.IsEmpty(Window.Property(silo.allow_signup))</visible></control>
 
       <control type="label"><left>56</left><top>52</top><width>668</width><height>34</height><aligny>center</aligny><font>font12</font><textcolor>BFEDEDED</textcolor><label>Silo server</label></control>
       <control type="edit" id="101">
@@ -56,7 +58,7 @@
         <textcolor>FFEDEDED</textcolor><focusedcolor>FF000000</focusedcolor>
         <texturefocus border="38" colordiffuse="FFEDEDED">pill76.png</texturefocus><texturenofocus border="38">pill76_idle.png</texturenofocus>
         <onleft>203</onleft><onright condition="!String.IsEmpty(Window.Property(silo.allow_code))">202</onright><onright condition="String.IsEmpty(Window.Property(silo.allow_code))">203</onright>
-        <onup condition="!String.IsEmpty(Window.Property(silo.allow_password))">103</onup><onup>101</onup><ondown>101</ondown>
+        <onup condition="!String.IsEmpty(Window.Property(silo.allow_password))">103</onup><onup>101</onup><ondown condition="!String.IsEmpty(Window.Property(silo.allow_signup))">204</ondown><ondown>101</ondown>
       </control>
       <control type="button" id="202">
         <left>268</left><top>578</top><width>284</width><height>76</height>
@@ -64,7 +66,7 @@
         <textcolor>FFEDEDED</textcolor><focusedcolor>FF000000</focusedcolor>
         <texturefocus border="38" colordiffuse="FFEDEDED">pill76.png</texturefocus><texturenofocus border="38">pill76_idle.png</texturenofocus>
         <onleft>201</onleft><onright>203</onright>
-        <onup condition="!String.IsEmpty(Window.Property(silo.allow_password))">103</onup><onup>101</onup><ondown>101</ondown>
+        <onup condition="!String.IsEmpty(Window.Property(silo.allow_password))">103</onup><onup>101</onup><ondown condition="!String.IsEmpty(Window.Property(silo.allow_signup))">204</ondown><ondown>101</ondown>
         <visible>!String.IsEmpty(Window.Property(silo.allow_code))</visible>
       </control>
       <control type="button" id="203">
@@ -73,7 +75,15 @@
         <textcolor>FFEDEDED</textcolor><focusedcolor>FF000000</focusedcolor>
         <texturefocus border="38" colordiffuse="FFEDEDED">pill76.png</texturefocus><texturenofocus border="38">pill76_idle.png</texturenofocus>
         <onleft condition="!String.IsEmpty(Window.Property(silo.allow_code))">202</onleft><onleft>201</onleft><onright>201</onright>
-        <onup condition="!String.IsEmpty(Window.Property(silo.allow_password))">103</onup><onup>101</onup><ondown>101</ondown>
+        <onup condition="!String.IsEmpty(Window.Property(silo.allow_password))">103</onup><onup>101</onup><ondown condition="!String.IsEmpty(Window.Property(silo.allow_signup))">204</ondown><ondown>101</ondown>
+      </control>
+      <control type="button" id="204">
+        <left>52</left><top>682</top><width>676</width><height>76</height>
+        <label>Create an account</label><font>font25_title</font><align>center</align><aligny>center</aligny>
+        <textcolor>FFEDEDED</textcolor><focusedcolor>FF000000</focusedcolor>
+        <texturefocus border="38" colordiffuse="FFEDEDED">pill76.png</texturefocus><texturenofocus border="38">pill76_idle.png</texturenofocus>
+        <onup>201</onup><ondown>101</ondown>
+        <visible>!String.IsEmpty(Window.Property(silo.allow_signup))</visible>
       </control>
     </control>
 

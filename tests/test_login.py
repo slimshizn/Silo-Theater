@@ -181,6 +181,30 @@ class LoginTests(unittest.TestCase):
             self.assertEqual(controls[key].get("type"), "button")
         self.assertIn("silo.allow_code", controls[CODE_CONTROL].findtext("visible"))
 
+    def test_create_account_button_is_extra_and_hidden_until_sign_up_is_allowed(self):
+        root = ET.parse(ROOT / "resources/skins/Default/1080i/SiloLogin.xml").getroot()
+        controls = {int(control.get("id")): control for control in root.findall(".//control[@id]")}
+        self.assertEqual(set(controls), {SERVER_CONTROL, USERNAME_CONTROL, PASSWORD_CONTROL, SIGN_IN_CONTROL,
+                                         CODE_CONTROL, CANCEL_CONTROL, 204})
+        signup = controls[204]
+        self.assertEqual(signup.get("type"), "button")
+        self.assertEqual(signup.findtext("visible"), "!String.IsEmpty(Window.Property(silo.allow_signup))")
+        self.assertEqual((signup.findtext("onup"), signup.findtext("ondown")), (str(SIGN_IN_CONTROL), str(SERVER_CONTROL)))
+        # Without sign-up the action row still wraps down to the server field.
+        for key in (SIGN_IN_CONTROL, CODE_CONTROL, CANCEL_CONTROL):
+            downs = controls[key].findall("ondown")
+            self.assertEqual([(node.get("condition"), node.text) for node in downs],
+                             [("!String.IsEmpty(Window.Property(silo.allow_signup))", "204"), (None, "101")])
+
+    def test_form_without_sign_up_hook_ignores_the_create_account_button(self):
+        def interact(window):
+            window.onClick(204)
+            self.assertFalse(window.closed)
+            window.onClick(CANCEL_CONTROL)
+
+        result, _ = self.window(interact, server_url="https://silo.invalid")
+        self.assertIsNone(result)
+
 
 if __name__ == "__main__":
     unittest.main()

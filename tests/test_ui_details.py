@@ -65,6 +65,8 @@ with patch.dict(sys.modules, {"xbmc": types.SimpleNamespace(log=MagicMock(), LOG
     media = importlib.import_module("resources.lib.silo.media")
 
 DetailsWindow = ui_details.DetailsWindow
+# Watchlist, Favorite and More close every action row.
+MARKS = [107, 108, 109]
 UP, DOWN, LEFT, RIGHT = ui_common.ACTION_UP, ui_common.ACTION_DOWN, ui_common.ACTION_LEFT, ui_common.ACTION_RIGHT
 
 
@@ -111,6 +113,10 @@ class DetailsWindowTests(unittest.TestCase):
             patcher = patch.object(module, "xbmcgui", XBMCGUI)
             patcher.start()
             self.addCleanup(patcher.stop)
+        self.xbmc = types.SimpleNamespace(getCondVisibility=MagicMock(return_value=False), Player=MagicMock())
+        patcher = patch.object(ui_details, "xbmc", self.xbmc)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.app = MagicMock()
         self.app.guard.side_effect = lambda callback: callback()
         self.app.image.side_effect = lambda item, kind: ("https://img.example/{}/{}".format(
@@ -189,14 +195,14 @@ class DetailsWindowTests(unittest.TestCase):
         # Play starts over with this setting, so Resume gets its own circle.
         self.assertEqual(window.properties["silo.play_label"], "Play")
         self.assertEqual(window.properties["silo.resume_button"], "true")
-        self.assertEqual(window.visible_buttons, [100, 101, 104])
+        self.assertEqual(window.visible_buttons, [100, 101, 104] + MARKS)
 
     def test_resume_preference_puts_the_position_on_play_and_lays_out_the_row(self):
         window = self.window(movie_item(4000, multiple=True))
         window.onInit()
         self.assertEqual(window.properties["silo.play_label"], "Resume 1:06:40")
         self.assertEqual(window.properties["silo.resume_button"], "")
-        self.assertEqual(window.visible_buttons, [100, 104, 103])
+        self.assertEqual(window.visible_buttons, [100, 104, 103] + MARKS)
         play_width = window.getControl(100).setWidth.call_args.args[0]
         window.getControl(1400).setPosition.assert_called_with(100, 556)
         window.getControl(1404).setPosition.assert_called_with(100 + play_width + 18, 556)
@@ -274,14 +280,14 @@ class DetailsWindowTests(unittest.TestCase):
         window.onInit()
         self.assertEqual(window.properties["silo.resume"], "")
         self.assertEqual(window.properties["silo.play_label"], "Play")
-        self.assertEqual(window.visible_buttons, [100])
+        self.assertEqual(window.visible_buttons, [100] + MARKS)
         self.assertEqual(window.properties["silo.plot"], "")
         self.assertEqual(window.properties["silo.credit"], "Starring Actor")
         self.assertIn("IMDb 8.5", window.properties["silo.meta"])
 
     def test_series_play_button_plays_next_up_and_names_the_episode(self):
         window = self.series_window()
-        self.assertEqual(window.visible_buttons, [105])
+        self.assertEqual(window.visible_buttons, [105] + MARKS)
         self.assertEqual(window.properties["silo.playable"], "")
         self.assertEqual(window.properties["silo.continue_label"], "Play S1:E2")
         self.assertEqual(window.focus, 105)
@@ -296,8 +302,8 @@ class DetailsWindowTests(unittest.TestCase):
         self.assertEqual(window.properties["silo.continue_label"], "Resume S1:E2")
         window = self.window(series_item(play_content_id=None), SEASONS)
         window.onInit()
-        self.assertEqual(window.visible_buttons, [])
-        self.assertEqual(window.focus, 510)
+        self.assertEqual(window.visible_buttons, MARKS)
+        self.assertEqual(window.focus, 107)
 
     # ---------------------------------------------------- seasons/episodes
     def test_seasons_are_ordered_with_specials_last_and_open_on_next_up_season(self):
@@ -480,6 +486,327 @@ class DetailsWindowTests(unittest.TestCase):
         meta_x = window.getControl(1230).setPosition.call_args.args[0]
         self.assertGreater(meta_x, window.getControl(1212).setPosition.call_args.args[0])
 
+    # ------------------------------------------------ personal marks & More
+    def route(self, responses):
+        """Answer client.request by (method, path); record every call."""
+        calls = []
+
+        def request(method, path, body=None, params=None):
+            calls.append((method, path, body))
+            return responses.get((method, path))
+
+        self.app.client.request.side_effect = request
+        return calls
+
+    def choose_more(self, window, label):
+        def contextmenu(labels):
+            self.menu = labels
+            return labels.index(label) if label in labels else -1
+
+        self.app.dialog.contextmenu.side_effect = contextmenu
+        window.onClick(109)
+
+    def test_watchlist_and_favorite_toggle_through_the_personal_routes(self):
+        calls = self.route({})
+        item = movie_item()
+        item["user_state"] = {"in_watchlist": False, "is_favorite": True, "played": False}
+        window = self.window(item)
+        window.onInit()
+        self.assertEqual(window.properties["silo.marks"], "true")
+        self.assertEqual(window.properties["silo.in_watchlist"], "")
+        self.assertEqual(window.properties["silo.favorite"], "true")
+        window.onFocus(107)
+        self.assertEqual(window.properties["silo.hint"], "Add to watchlist")
+        window.onClick(107)
+        self.assertEqual(calls[-1], ("PUT", "/watchlist/movie%3A1", None))
+        self.assertEqual(window.properties["silo.in_watchlist"], "true")
+        self.assertEqual(window.properties["silo.hint"], "Remove from watchlist")
+        window.onClick(107)
+        self.assertEqual(calls[-1], ("DELETE", "/watchlist/movie%3A1", None))
+        self.assertEqual(window.properties["silo.in_watchlist"], "")
+        window.onClick(108)
+        self.assertEqual(calls[-1], ("DELETE", "/favorites/movie%3A1", None))
+        self.assertEqual(window.properties["silo.favorite"], "")
+        self.assertEqual(window.properties["silo.hint"], "Add to favorites")
+
+    def test_round_buttons_follow_the_row_and_take_focus_without_play(self):
+        window = self.window(movie_item(0))
+        window.onInit()
+        self.assertEqual(window.visible_buttons, [100] + MARKS)
+        play_width = window.getControl(100).setWidth.call_args.args[0]
+        window.getControl(1407).setPosition.assert_called_with(100 + play_width + 18, 556)
+        window.getControl(1409).setPosition.assert_called_with(100 + play_width + 18 + 2 * (76 + 18), 556)
+        window.onFocus(109)
+        self.assertEqual(window.properties["silo.hint"], "More")
+
+    def test_more_menu_on_a_movie_marks_watched_and_shows_media_info(self):
+        calls = self.route({})
+        item = self.subtitled_item(multiple=False)
+        item["versions"][0].update(container="mkv", file_size=4 * 1024 ** 3, bitrate=12000, duration=7200,
+                                   video_tracks=[{"codec": "hevc", "width": 3840, "height": 2160,
+                                                  "video_range_type": "HDR10", "bit_depth": 10}],
+                                   audio_tracks=[{"language": "eng", "codec": "truehd", "channels": 8,
+                                                  "default": True}])
+        window = self.window(item)
+        window.onInit()
+        self.choose_more(window, "Media info")
+        self.assertEqual(self.menu, ["Mark as watched", "Media info"])
+        title, text = self.app.dialog.textviewer.call_args.args
+        self.assertEqual(title, "Media info")
+        for expected in ("Example.UHD.mkv", "MKV · 2160p · 4.00 GB · 12000 kbps · 2:00:00",
+                         "HEVC · 3840x2160 · HDR10 · 10-bit", "English · TRUEHD · 7.1 · Default",
+                         "English · Full", "French · Forced", "External"):
+            self.assertIn(expected, text)
+        refreshed = dict(item, user_data={"played": True})
+        self.app.refresh_item.return_value = refreshed
+        self.choose_more(window, "Mark as watched")
+        self.assertIn(("POST", "/watched/movie%3A1", None), calls)
+        self.app.refresh_item.assert_called_with(item, "file-a")
+        self.assertIs(window.item, refreshed)
+        self.choose_more(window, "Mark as unwatched")
+        self.assertEqual(calls[-1], ("DELETE", "/watched/movie%3A1", None))
+
+    def test_more_menu_on_a_series_shuffles_and_marks_the_selected_season(self):
+        calls = self.route({("GET", "/shuffles/capabilities"): {"state": "available",
+                                                                 "scope_kinds": ["series", "season"]}})
+        window = self.series_window()
+        with patch.object(ui_details.svc_shuffle, "play_shuffle", return_value=0) as play_shuffle:
+            self.choose_more(window, "Shuffle series")
+            play_shuffle.assert_called_once_with(self.app, series_id="series:1")
+            self.assertEqual(self.menu[:4], ["Shuffle series", "Shuffle Season 1", "Mark as watched",
+                                             "Mark Season 1 as watched"])
+            self.choose_more(window, "Shuffle Season 1")
+            play_shuffle.assert_called_with(self.app, season_id="season:1")
+        self.assertEqual([call for call in calls if call[1] == "/shuffles/capabilities"],
+                         [("GET", "/shuffles/capabilities", None)])
+        self.app.refresh_item.return_value = window.item
+        fetched = self.app.episodes.call_count
+        self.choose_more(window, "Mark Season 1 as watched")
+        self.assertEqual(calls[-1], ("POST", "/watched/season%3A1", None))
+        self.assertEqual(self.app.episodes.call_count, fetched + 1)
+        self.assertTrue(window.seasons[0]["user_data"]["played"])
+        self.choose_more(window, "Mark Season 1 as unwatched")
+        self.assertEqual(calls[-1], ("DELETE", "/watched/season%3A1", None))
+
+    def test_shuffle_is_hidden_when_the_server_cannot_shuffle(self):
+        self.route({("GET", "/shuffles/capabilities"): {"state": "not_configured", "scope_kinds": []}})
+        window = self.series_window()
+        self.choose_more(window, "nothing")
+        self.assertFalse(any(label.startswith("Shuffle") for label in self.menu))
+
+    def test_season_page_shuffles_the_season_and_reloads_its_episodes_after_marking(self):
+        calls = self.route({("GET", "/shuffles/capabilities"): {"state": "available", "scope_kinds": ["season"]}})
+        season = {"content_id": "season:1", "type": "season", "season_number": 1, "series_id": "series:1",
+                  "title": "Season 1"}
+        window = self.window(season, episodes_for({"season_number": 1}))
+        window.onInit()
+        with patch.object(ui_details.svc_shuffle, "play_shuffle", return_value=0) as play_shuffle:
+            self.choose_more(window, "Shuffle season")
+        play_shuffle.assert_called_once_with(self.app, season_id="season:1")
+        self.assertIn("Go to series", self.menu)
+        self.assertNotIn("Go to season 1", self.menu)
+        self.app.refresh_item.return_value = season
+        self.choose_more(window, "Mark as watched")
+        self.assertEqual(calls[-1], ("POST", "/watched/season%3A1", None))
+        self.app.episodes.assert_called_once_with(season)
+
+    def test_episode_more_menu_goes_to_its_season_and_series(self):
+        self.app.client.seasons.return_value = {"items": SEASONS}
+        episode = dict(episodes_for({"season_number": 2})[0], series_id="series:1", versions=movie_item()["versions"])
+        window = self.window(episode)
+        window.onInit()
+        self.choose_more(window, "Go to season 2")
+        self.app.client.seasons.assert_called_once_with("series:1")
+        self.assertEqual(self.app.open_item.call_args.args[0]["content_id"], "season:2")
+        self.choose_more(window, "Go to series")
+        self.app.open_item.assert_called_with({"content_id": "series:1"})
+
+    def test_translate_description_needs_the_capability_and_a_pending_language(self):
+        item = dict(movie_item(), pending_translation_language="de")
+        path = "/catalog/items/movie%3A1/translate-description"
+        calls = self.route({("GET", "/capabilities/metadata-ai"): {"state": "available", "on_view": "button"}})
+        self.app.refresh_item.return_value = item
+        window = self.window(item)
+        window.onInit()
+        self.choose_more(window, "Translate description")
+        self.assertIn(("POST", path, {"target_language": "de"}), calls)
+        self.app.dialog.notification.assert_called_once()
+        for capability, pending in (({"state": "not_configured", "on_view": "off"}, "de"),
+                                    ({"state": "available", "on_view": "off"}, "de"),
+                                    ({"state": "available", "on_view": "auto"}, None)):
+            self.route({("GET", "/capabilities/metadata-ai"): capability})
+            window = self.window(dict(movie_item(), pending_translation_language=pending))
+            window.onInit()
+            self.choose_more(window, "nothing")
+            self.assertNotIn("Translate description", self.menu)
+
+    def test_cancelling_the_more_menu_does_nothing(self):
+        calls = self.route({})
+        window = self.window(movie_item())
+        window.onInit()
+        self.choose_more(window, "nothing")
+        self.assertEqual([call for call in calls if call[0] != "GET"], [])
+
+    # ------------------------------------------------------- cast & extras
+    def test_cast_cards_open_the_person_screen(self):
+        item = movie_item()
+        item["cast"] = [{"name": "Actor One", "character": "Hero", "person_id": "person-7"}, {"name": "Actor Two"}]
+        window = self.window(item)
+        window.onInit()
+        window.onClick(530)
+        self.app.open_screen.assert_called_once_with("person", person_id="person-7", name="Actor One")
+        window.getControl(530).getSelectedPosition.return_value = 1
+        window.onClick(530)
+        self.assertEqual(self.app.open_screen.call_count, 1)
+
+    def trailer_item(self):
+        item = movie_item()
+        item["extras"] = [{"content_id": "extra:9", "kind": "behind_the_scenes", "duration_seconds": 125,
+                           "file_id": 9}]
+        item["videos"] = [{"kind": "trailer", "site": "YouTube", "site_key": "abcDEF12345", "name": "Official Trailer"},
+                          {"kind": "teaser", "site": "vimeo", "site_key": "123456"},
+                          {"kind": "clip", "site": "youtube", "site_key": "bad key&x=1"}]
+        return item
+
+    def test_youtube_trailers_show_only_with_the_youtube_addon(self):
+        window = self.window(self.trailer_item())
+        window.onInit()
+        self.xbmc.getCondVisibility.assert_called_with("System.HasAddon(plugin.video.youtube)")
+        entries = window.getControl(560).addItems.call_args.args[0]
+        self.assertEqual([(entry.label, entry.label2) for entry in entries],
+                         [("Behind the Scenes", "Behind the Scenes · 2:05")])
+        self.assertEqual(window.properties["silo.has_extras"], "true")
+        self.xbmc.getCondVisibility.return_value = True
+        window = self.window(self.trailer_item())
+        window.onInit()
+        entries = window.getControl(560).addItems.call_args.args[0]
+        self.assertEqual([entry.label for entry in entries], ["Behind the Scenes", "Official Trailer"])
+        self.assertEqual(entries[1].art, {"thumb": "https://i.ytimg.com/vi/abcDEF12345/hqdefault.jpg"})
+        window.getControl(560).getSelectedPosition.return_value = 1
+        window.onClick(560)
+        self.xbmc.Player.return_value.play.assert_called_once_with(
+            "plugin://plugin.video.youtube/play/?video_id=abcDEF12345")
+        self.app.play.assert_not_called()
+
+    def test_no_trailers_hides_the_row(self):
+        window = self.window(movie_item())
+        window.onInit()
+        self.assertEqual(window.properties["silo.has_extras"], "")
+        self.assertNotIn("extras", window.available_zones())
+
+    def test_local_extras_play_as_catalog_items(self):
+        extra = {"content_id": "extra:9", "type": "extra", "title": "Making Of", "versions": movie_item()["versions"]}
+        self.app.client.item.return_value = extra
+        window = self.window(self.trailer_item())
+        window.onInit()
+        window.onClick(560)
+        self.app.client.item.assert_called_once_with("extra:9")
+        played = self.app.play.call_args.args[0]
+        self.assertEqual(played["content_id"], "extra:9")
+        self.assertEqual(played["type"], "movie")
+        self.assertEqual(played["versions"], extra["versions"])
+        self.xbmc.Player.return_value.play.assert_not_called()
+
+    # -------------------------------------------------------------- facts
+    def test_details_table_lists_facts_in_the_android_order(self):
+        item = movie_item()
+        item.update(title="Example", original_title="Exemple", original_language="fr", studios=["Example Studio"],
+                    networks=["Example Network"], countries=["France", "Canada"], genres=["Drama", "Comedy"],
+                    release_date="2021-03-09", crew=[{"name": "Example Director", "job": "Director"},
+                                                     {"name": "Example Writer", "job": "Screenplay"}],
+                    ratings=[{"source": "imdb", "name": "IMDb", "display": "8.1"},
+                             {"source": "rt_critic", "name": "Rotten Tomatoes", "display": "91%"}])
+        item["versions"][0]["audio_tracks"] = [{"language": "fre"}, {"language": "eng"}, {"language": "fra"}]
+        window = self.window(item)
+        window.onInit()
+        rows = [(entry.label, entry.label2) for entry in window.getControl(570).addItems.call_args.args[0]]
+        self.assertEqual(rows, [("DIRECTOR", "Example Director"), ("WRITTEN BY", "Example Writer"),
+                                ("STUDIO", "Example Studio"), ("NETWORK", "Example Network"),
+                                ("COUNTRY", "France, Canada"), ("ORIGINAL TITLE", "Exemple"),
+                                ("ORIGINAL LANGUAGE", "French"), ("AUDIO", "French, English"),
+                                ("GENRES", "Drama, Comedy"), ("RELEASED", "March 9, 2021"),
+                                ("RATINGS", "IMDb 8.1 · Rotten Tomatoes 91%")])
+        self.assertEqual(window.properties["silo.has_facts"], "true")
+        self.assertEqual(window.available_zones(), ["buttons", "facts"])
+        window.onAction(Action(DOWN))
+        self.assertEqual((window.focus, window.scroll_offset), (570, 700 - 140))
+        window.getControl(6000).setPosition.assert_called_with(0, 700)
+
+    def test_series_and_episode_dates_and_rating_fallbacks(self):
+        series = series_item(first_air_date="2019-01-02", last_air_date="2023-12-31", rating_tmdb=7.25)
+        self.assertEqual(ui_details.facts(series), [("First aired", "January 2, 2019"),
+                                                    ("Last aired", "December 31, 2023"), ("Ratings", "TMDB 7.2")])
+        episode = dict(episodes_for({"season_number": 1})[0], air_date="2024-01-05")
+        self.assertEqual(ui_details.facts(episode), [("Aired", "January 5, 2024")])
+        self.assertEqual(ui_details.facts({"type": "movie", "title": "Same", "original_title": "Same"}), [])
+
+    def test_sections_stack_cast_trailers_related_then_details(self):
+        self.app.similar.return_value = [{"content_id": "movie:9", "type": "movie", "title": "Other"}]
+        item = self.trailer_item()
+        item.update(cast=[{"name": "Actor One"}], studios=["Example Studio"])
+        window = self.window(item)
+        window.onInit()
+        self.assertEqual(window.available_zones(), ["buttons", "cast", "extras", "similar", "facts"])
+        self.assertEqual((window.cast_top, window.extras_top, window.similar_top, window.facts_top),
+                         (700, 1100, 1500, 1960))
+        offsets = []
+        for _ in range(4):
+            window.onAction(Action(DOWN))
+            offsets.append((window.focus, window.scroll_offset))
+        self.assertEqual(offsets, [(530, 560), (560, 960), (540, 1360), (570, 1820)])
+
+    # ------------------------------------------------------------ spoilers
+    def test_hide_spoilers_blanks_unwatched_episode_stills_and_synopsis(self):
+        self.app.options.return_value["hide_spoilers"] = True
+
+        def episodes(season):
+            result = episodes_for(season)
+            result[0]["user_data"] = {"played": True}
+            result[1]["user_data"] = {"position_seconds": 30, "is_in_progress": True}
+            for episode in result:
+                episode["still_url"] = "https://img.example/{}.jpg".format(episode["content_id"])
+            return result
+
+        self.app.episodes.side_effect = episodes
+        window = self.series_window()
+        entries = window.getControl(520).addItems.call_args.args[0]
+        self.assertNotEqual(entries[0].art.get("thumb"), "")
+        self.assertNotEqual(entries[1].art.get("thumb"), "")
+        self.assertEqual(entries[2].art, {"thumb": "", "poster": "", "fanart": ""})
+        self.assertEqual(entries[2].properties["silo.plot"], "")
+        self.assertEqual(entries[0].properties["silo.plot"], "Episode 1")
+        window.getControl(520).getSelectedPosition.return_value = 2
+        window.onFocus(520)
+        self.assertEqual(window.properties["silo.title"], "CHAPTER 3")
+        self.assertEqual(window.properties["silo.plot"], "")
+        window.getControl(520).getSelectedPosition.return_value = 1
+        window.onAction(Action(LEFT))
+        self.assertEqual(window.properties["silo.plot"], "Episode 2")
+
+    def test_spoilers_show_when_the_setting_is_off(self):
+        window = self.series_window()
+        entries = window.getControl(520).addItems.call_args.args[0]
+        self.assertEqual(entries[2].properties["silo.plot"], "Episode 3")
+        window.getControl(520).getSelectedPosition.return_value = 2
+        window.onFocus(520)
+        self.assertEqual(window.properties["silo.plot"], "Episode 3")
+
+    def test_unwatched_rule_matches_android(self):
+        self.assertTrue(ui_details.is_unwatched({}))
+        self.assertTrue(ui_details.is_unwatched({"user_data": {"played": False, "position_seconds": 0}}))
+        self.assertFalse(ui_details.is_unwatched({"user_data": {"played": True}}))
+        self.assertFalse(ui_details.is_unwatched({"user_state": {"played": True}}))
+        self.assertFalse(ui_details.is_unwatched({"user_data": {"is_in_progress": True}}))
+        self.assertFalse(ui_details.is_unwatched({"user_data": {"position_seconds": 12}}))
+
+    def test_media_info_without_a_version_or_tracks(self):
+        self.assertEqual(ui_details.media_info_text(None), "No media details are available.")
+        text = ui_details.media_info_text({"file_id": "f", "file_name": "Example.mkv", "codec_video": "h264",
+                                           "codec_audio": "aac", "resolution": "1080p", "hdr": False})
+        self.assertIn("• H.264 · 1080p", text)
+        self.assertIn("• AAC", text)
+        self.assertNotIn("Subtitles", text)
+
     def test_back_closes_window(self):
         window = self.window(movie_item())
         window.onAction(Action(92))
@@ -502,8 +829,9 @@ class DetailsSkinTests(unittest.TestCase):
     def test_ids_are_unique_and_cover_the_controller(self):
         ids = [int(node.attrib["id"]) for node in self.tree.iter("control") if "id" in node.attrib]
         self.assertEqual(len(ids), len(set(ids)))
-        required = {100, 101, 103, 104, 105, 106, 510, 520, 530, 540, 1000, 3000, 4000, 1101, 1102, 1103,
-                    1201, 1202, 1230} | {1300 + control_id for control_id in ui_details.BUTTON_ORDER}
+        required = {100, 101, 103, 104, 105, 106, 107, 108, 109, 510, 520, 530, 540, 560, 570, 1000, 3000, 4000,
+                    5000, 6000, 1101, 1102, 1103, 1201, 1202, 1230}
+        required |= {1300 + control_id for control_id in ui_details.BUTTON_ORDER}
         required |= {ui_details.BADGE + slot for slot in range(ui_details.MAX_BADGES)}
         self.assertTrue(required.issubset(ids), required - set(ids))
         for direction in ("onleft", "onright", "onup", "ondown"):
@@ -523,7 +851,7 @@ class DetailsSkinTests(unittest.TestCase):
             self.assertTrue((MEDIA / name).is_file(), name)
 
     def test_zone_controls_leave_up_and_down_to_python(self):
-        for control_id in ui_details.BUTTON_ORDER + (510, 520, 530, 540):
+        for control_id in ui_details.BUTTON_ORDER + tuple(ui_details.ZONE_CONTROLS.values()):
             for direction in ("onup", "ondown"):
                 self.assertEqual([int(node.text) for node in self.controls[control_id].findall(direction)],
                                  [control_id], (control_id, direction))
@@ -540,8 +868,10 @@ class DetailsSkinTests(unittest.TestCase):
             return True
 
         # Movie with resume (both preferences), plain movie, subtitles, series, and a movie without files.
+        marks = {107, 108, 109}
         scenarios = (({100, 104, 103, 106}, set()), ({100, 101, 104}, set()), ({100}, set()),
-                     ({100, 106}, set()), ({105}, set()), ({100, 106}, {100}))
+                     ({100, 106}, set()), ({105}, set()), ({100, 106}, {100}), ({100, 104, 103, 106} | marks, set()),
+                     ({105} | marks, set()), (marks, set()), ({100, 106} | marks, {100}))
         for visible, disabled in scenarios:
             enabled = visible - disabled
             for current in enabled:
@@ -556,6 +886,19 @@ class DetailsSkinTests(unittest.TestCase):
                 target = next(int(node.text) for node in choices if not node.get("condition")
                               or condition_matches(node.attrib["condition"], visible, enabled))
                 self.assertEqual(target, right)
+
+    def test_toggle_buttons_draw_their_state_and_sections_show_only_with_content(self):
+        text = SKIN.read_text(encoding="utf-8")
+        self.assertIn("!String.IsEmpty(Window.Property(silo.in_watchlist))", text)
+        self.assertIn("!String.IsEmpty(Window.Property(silo.favorite))", text)
+        self.assertIn("icon_check.png", text)
+        for name in ("silo.has_extras", "silo.has_facts", "silo.marks"):
+            self.assertIn("!String.IsEmpty(Window.Property({}))".format(name), text)
+        self.assertEqual(self.controls[560].findtext("orientation"), "horizontal")
+        self.assertEqual(self.controls[570].findtext("orientation"), "vertical")
+        fonts = {node.text for node in self.tree.iter("font")}
+        self.assertTrue(fonts <= {"font_MainMenu", "font36_title", "font30_title", "font25_title", "font27",
+                                  "font12", "font10", "font_flag"}, fonts)
 
 
 if __name__ == "__main__":

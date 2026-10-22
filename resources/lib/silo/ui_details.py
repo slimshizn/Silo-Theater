@@ -2,32 +2,39 @@
 
 A hero (backdrop, title or logo, facts, synopsis) sits above a row of
 actions. Series add season capsules and an episode rail; every title can
-show its cast and related titles further down. The page scrolls in zones:
+show its cast, trailers and extras, related titles and a facts table
+further down. Round Watchlist and Favorite toggles and a More menu (shuffle,
+mark watched, go to series or season, media info, translation) follow the
+play actions. The page scrolls in zones:
 Python moves focus up and down between zones and slides the page so the
 focused zone is in view, while left and right stay native inside a zone.
 The layout constants here match scripts/skin_details.py.
 """
 
-from urllib.parse import urlsplit
+import re
+from urllib.parse import quote, urlsplit
 
+import xbmc
 import xbmcgui
 
-from . import present
+from . import present, svc_personal, svc_shuffle
 from .media import (available_versions, default_version, format_time, is_multipart, resume_position,
                     subtitle_choices, version_label, version_name)
 from .ui_common import (ACTION_DOWN, ACTION_LEFT, ACTION_RIGHT, ACTION_UP, BACK_ACTIONS, Debouncer,
                         card_list_item, set_properties)
 
 PLAY, RESUME, VERSION, START_OVER, NEXT_UP, SUBTITLES = 100, 101, 103, 104, 105, 106
-SEASONS, EPISODES, CAST, SIMILAR = 510, 520, 530, 540
-PAGE, CAST_GROUP, SIMILAR_GROUP = 1000, 3000, 4000
+WATCHLIST, FAVORITE, MORE = 107, 108, 109
+SEASONS, EPISODES, CAST, SIMILAR, EXTRAS, FACTS = 510, 520, 530, 540, 560, 570
+PAGE, CAST_GROUP, SIMILAR_GROUP, EXTRAS_GROUP, FACTS_GROUP = 1000, 3000, 4000, 5000, 6000
 SUPERTITLE, TITLE, TITLE2 = 1101, 1102, 1103
 CHIP, CHIP_LABEL, BADGE, BADGE_LABEL, META = 1201, 1202, 1211, 1221, 1230
 # A button's group id is 1300 + its id; the order is the on-screen order.
-BUTTON_ORDER = (NEXT_UP, PLAY, RESUME, START_OVER, VERSION, SUBTITLES)
+BUTTON_ORDER = (NEXT_UP, PLAY, RESUME, START_OVER, VERSION, SUBTITLES, WATCHLIST, FAVORITE, MORE)
 CAPSULES = (NEXT_UP, PLAY)
-ZONES = ("buttons", "seasons", "episodes", "cast", "similar")
-ZONE_CONTROLS = {"seasons": SEASONS, "episodes": EPISODES, "cast": CAST, "similar": SIMILAR}
+ZONES = ("buttons", "seasons", "episodes", "cast", "extras", "similar", "facts")
+ZONE_CONTROLS = {"seasons": SEASONS, "episodes": EPISODES, "cast": CAST, "extras": EXTRAS,
+                 "similar": SIMILAR, "facts": FACTS}
 
 LEFT = 100
 TEXT_RIGHT = LEFT + 1080
@@ -41,10 +48,32 @@ MAX_BADGES = 5
 SECTIONS_TOP = 700
 SECTIONS_TOP_SERIES = 1100
 CAST_HEIGHT = 400
+EXTRAS_HEIGHT = 400
+SIMILAR_HEIGHT = 460
+MAX_FACTS = 12
 # A scrolled-to section's heading sits this far from the top of the screen.
 SECTION_SCROLL_TOP = 140
 SEASON_SETTLE_SECONDS = 0.3
 MAX_CAST = 30
+
+YOUTUBE_ADDON = "plugin.video.youtube"
+YOUTUBE_PLAY = "plugin://plugin.video.youtube/play/?video_id={}"
+YOUTUBE_THUMB = "https://i.ytimg.com/vi/{}/hqdefault.jpg"
+_YOUTUBE_KEY = re.compile(r"[A-Za-z0-9_-]{6,32}")
+EXTRA_KINDS = {"trailer": "Trailer", "teaser": "Teaser", "featurette": "Featurette", "clip": "Clip",
+               "behind_the_scenes": "Behind the Scenes", "deleted_scene": "Deleted Scene",
+               "interview": "Interview", "short": "Short", "scene": "Scene", "bloopers": "Bloopers"}
+LANGUAGES = {"en": "English", "fr": "French", "de": "German", "es": "Spanish", "it": "Italian", "ja": "Japanese",
+             "ko": "Korean", "zh": "Chinese", "pt": "Portuguese", "ru": "Russian", "ar": "Arabic", "hi": "Hindi",
+             "nl": "Dutch", "sv": "Swedish", "da": "Danish", "no": "Norwegian", "fi": "Finnish", "pl": "Polish",
+             "tr": "Turkish", "cs": "Czech", "el": "Greek", "he": "Hebrew", "hu": "Hungarian", "th": "Thai"}
+LANGUAGE_CODES = {"eng": "en", "fre": "fr", "fra": "fr", "ger": "de", "deu": "de", "spa": "es", "ita": "it",
+                  "jpn": "ja", "kor": "ko", "chi": "zh", "zho": "zh", "por": "pt", "rus": "ru", "ara": "ar",
+                  "hin": "hi", "dut": "nl", "nld": "nl", "swe": "sv", "dan": "da", "nor": "no", "fin": "fi",
+                  "pol": "pl", "tur": "tr", "cze": "cs", "ces": "cs", "gre": "el", "ell": "el", "heb": "he",
+                  "hun": "hu", "tha": "th"}
+MONTHS = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+          "November", "December")
 
 
 def _text(value):
@@ -69,6 +98,208 @@ def chip_width(text):
     return 24 + 13 * len(text)
 
 
+# ------------------------------------------------------------- pure helpers
+def is_unwatched(item):
+    """An episode nobody on this profile has started (Android's spoiler rule)."""
+    data = item.get("user_data") if isinstance(item.get("user_data"), dict) else {}
+    state = item.get("user_state") if isinstance(item.get("user_state"), dict) else {}
+    if data.get("played") is True or state.get("played") is True or data.get("is_in_progress") is True:
+        return False
+    position = data.get("position_seconds", item.get("position_seconds"))
+    try:
+        return float(position or 0) <= 0
+    except (TypeError, ValueError):
+        return True
+
+
+def language_name(code):
+    code = _text(code).lower()
+    if not code or code == "und":
+        return ""
+    code = LANGUAGE_CODES.get(code, code)
+    return LANGUAGES.get(code, code.upper())
+
+
+def long_date(value):
+    """``2024-03-09`` -> ``March 9, 2024``; other text is returned as is."""
+    value = _text(value)
+    parts = value[:10].split("-")
+    try:
+        year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+        return "{} {}, {}".format(MONTHS[month - 1], day, year)
+    except (ValueError, IndexError):
+        return value
+
+
+def _names(values, limit=3):
+    names = [_text(value) for value in values if _text(value)] if isinstance(values, list) else []
+    return ", ".join(names[:limit])
+
+
+def _crew(item, tokens):
+    crew = item.get("crew") if isinstance(item.get("crew"), list) else []
+    names = []
+    for person in crew:
+        if not isinstance(person, dict):
+            continue
+        job, name = _text(person.get("job")).lower(), _text(person.get("name"))
+        if name and name not in names and any(token in job for token in tokens):
+            names.append(name)
+    return ", ".join(names[:3]) + (", …" if len(names) > 3 else "")
+
+
+def ratings_line(item):
+    """Every external rating the server shows, as "IMDb 8.5 · TMDB 7.9"."""
+    ratings = item.get("ratings") if isinstance(item.get("ratings"), list) else []
+    parts = ["{} {}".format(_text(rating.get("name")), _text(rating.get("display"))).strip()
+             for rating in ratings if isinstance(rating, dict) and _text(rating.get("display"))]
+    if parts:
+        return " · ".join(parts)
+    fallback = []
+    for key, name in (("rating_imdb", "IMDb"), ("rating_tmdb", "TMDB")):
+        if isinstance(item.get(key), (int, float)) and not isinstance(item.get(key), bool) and item[key]:
+            fallback.append("{} {:.1f}".format(name, item[key]))
+    for key, name in (("rating_rt_critic", "Rotten Tomatoes"), ("rating_rt_audience", "RT Audience")):
+        if isinstance(item.get(key), int) and not isinstance(item.get(key), bool):
+            fallback.append("{} {}%".format(name, item[key]))
+    return " · ".join(fallback)
+
+
+def facts(item, version=None):
+    """The Details table: (label, value) rows in the Android facts order."""
+    rows = [("Director", _crew(item, ("director",))),
+            ("Written by", _crew(item, ("writer", "screenplay", "story", "teleplay"))),
+            ("Created by", _crew(item, ("creator",))),
+            ("Studio", _names(item.get("studios"))),
+            ("Network", _names(item.get("networks"))),
+            ("Country", _names(item.get("countries")))]
+    title, original = _text(item.get("title")), _text(item.get("original_title"))
+    rows.append(("Original title", original if original and original != title else ""))
+    rows.append(("Original language", language_name(item.get("original_language"))))
+    if version:
+        audio = []
+        for track in version.get("audio_tracks") or []:
+            name = language_name(track.get("language")) if isinstance(track, dict) else ""
+            if name and name not in audio:
+                audio.append(name)
+        rows.append(("Audio", ", ".join(audio)))
+    rows.append(("Genres", _names(item.get("genres"), limit=10)))
+    if item.get("type") == "episode":
+        rows.append(("Aired", long_date(item.get("air_date") or item.get("release_date"))))
+    else:
+        rows += [("Released", long_date(item.get("release_date"))),
+                 ("First aired", long_date(item.get("first_air_date"))),
+                 ("Last aired", long_date(item.get("last_air_date")))]
+    rows.append(("Ratings", ratings_line(item)))
+    return [(label, value) for label, value in rows if value][:MAX_FACTS]
+
+
+def _codec(value):
+    value = _text(value)
+    return {"hevc": "HEVC", "h265": "HEVC", "h264": "H.264", "avc": "H.264", "subrip": "SRT",
+            "hdmv_pgs_subtitle": "PGS", "webvtt": "VTT", "dca": "DTS"}.get(value.lower(), value.upper())
+
+
+def _channels(count):
+    return {1: "Mono", 2: "Stereo", 6: "5.1", 8: "7.1"}.get(count, "{}ch".format(count)) if count else ""
+
+
+def _size(value):
+    if not isinstance(value, (int, float)) or value <= 0:
+        return ""
+    gigabytes = value / 1024.0 ** 3
+    return "{:.2f} GB".format(gigabytes) if gigabytes >= 1 else "{:.0f} MB".format(value / 1024.0 ** 2)
+
+
+def _join(*parts):
+    return " · ".join(_text(part) for part in parts if _text(part))
+
+
+def media_info_text(version):
+    """Container, video, audio and subtitle tracks of one file version."""
+    if not version:
+        return "No media details are available."
+    lines = [version_name(version)]
+    duration = version.get("duration")
+    bitrate = version.get("bitrate")
+    lines.append(_join(_text(version.get("container")).upper(), _text(version.get("resolution")),
+                       _size(version.get("file_size")),
+                       "{} kbps".format(bitrate) if isinstance(bitrate, int) and bitrate > 0 else "",
+                       format_time(duration) if isinstance(duration, (int, float)) and duration > 0 else ""))
+    video = [track for track in version.get("video_tracks") or [] if isinstance(track, dict)]
+    lines += ["", "[B]Video[/B]"]
+    if video:
+        for track in video:
+            size = "{}x{}".format(track["width"], track["height"]) if track.get("width") and track.get("height") else ""
+            dynamic = _text(track.get("video_range_type") or track.get("video_range"))
+            if track.get("dolby_vision") or track.get("dv_profile"):
+                dynamic = _join(dynamic, "Dolby Vision" + (" P{}".format(track["dv_profile"])
+                                                           if track.get("dv_profile") else ""))
+            lines.append("• " + _join(_codec(track.get("codec")), size, dynamic,
+                                      "{} fps".format(track["frame_rate"]) if track.get("frame_rate") else "",
+                                      "{}-bit".format(track["bit_depth"]) if track.get("bit_depth") else ""))
+    else:
+        lines.append("• " + _join(_codec(version.get("codec_video")), version.get("resolution"),
+                                  "HDR" if version.get("hdr") else ""))
+    audio = [track for track in version.get("audio_tracks") or [] if isinstance(track, dict)]
+    lines += ["", "[B]Audio[/B]"]
+    if audio:
+        for track in audio:
+            lines.append("• " + _join(language_name(track.get("language")), track.get("title"),
+                                      _codec(track.get("codec")), _channels(track.get("channels")),
+                                      "Default" if track.get("default") else ""))
+    else:
+        lines.append("• " + (_codec(version.get("codec_audio")) or "Unknown"))
+    subtitles = [track for track in version.get("subtitle_tracks") or [] if isinstance(track, dict)]
+    if subtitles:
+        lines += ["", "[B]Subtitles[/B]"]
+        for track in subtitles:
+            lines.append("• " + _join(language_name(track.get("language")) or "Unknown", track.get("title"),
+                                      _codec(track.get("codec")), "Forced" if track.get("forced") else "",
+                                      "SDH" if track.get("hearing_impaired") else "",
+                                      "External" if track.get("external") else ""))
+    return "\n".join(line for line in lines if line is not None)
+
+
+def extra_kind_label(kind):
+    kind = _text(kind).lower().replace("-", "_")
+    return EXTRA_KINDS.get(kind) or (" ".join(word.capitalize() for word in kind.split("_") if word) or "Extra")
+
+
+def duration_label(seconds):
+    if not isinstance(seconds, (int, float)) or isinstance(seconds, bool) or seconds <= 0:
+        return ""
+    return format_time(seconds)
+
+
+def trailer_entries(item, youtube_available):
+    """Local extras first (they play in Silo), then YouTube videos when they can play."""
+    entries, seen = [], set()
+    for extra in item.get("extras") or []:
+        if not isinstance(extra, dict) or not _text(extra.get("content_id")):
+            continue
+        key = "local:" + _text(extra["content_id"])
+        if key in seen:
+            continue
+        seen.add(key)
+        kind = extra_kind_label(extra.get("kind"))
+        entries.append({"source": "local", "extra": extra, "title": _text(extra.get("title")) or kind,
+                        "label2": _join(kind, duration_label(extra.get("duration_seconds"))),
+                        "still": _text(extra.get("still_url"))})
+    if youtube_available:
+        for video in item.get("videos") or []:
+            if not isinstance(video, dict) or _text(video.get("site")).lower() != "youtube":
+                continue
+            key = _text(video.get("site_key"))
+            if not _YOUTUBE_KEY.fullmatch(key) or "remote:" + key in seen:
+                continue
+            seen.add("remote:" + key)
+            kind = extra_kind_label(video.get("kind"))
+            entries.append({"source": "youtube", "key": key, "title": _text(video.get("name")) or kind,
+                            "label2": _join(kind, "YouTube"), "thumb": YOUTUBE_THUMB.format(key)})
+    return entries
+
+
 class DetailsWindow(xbmcgui.WindowXML):
     """A title's metadata and actions, with season/episode navigation."""
 
@@ -83,6 +314,7 @@ class DetailsWindow(xbmcgui.WindowXML):
         self.subtitle_index = None
         self.can_resume = False
         self.show_plot = True
+        self.hide_spoilers = False
         self.resume_label = ""
         self.subtitle_label = ""
         self.play_label = "Play"
@@ -93,6 +325,8 @@ class DetailsWindow(xbmcgui.WindowXML):
         self.episode_cache = {}
         self.cast = []
         self.similar = []
+        self.extras = []
+        self.facts = []
         self.visible_buttons = []
         self.focusable_buttons = []
         self.last_button = None
@@ -101,6 +335,11 @@ class DetailsWindow(xbmcgui.WindowXML):
         self.scroll_offset = 0
         self.cast_top = SECTIONS_TOP
         self.similar_top = SECTIONS_TOP
+        self.extras_top = SECTIONS_TOP
+        self.facts_top = SECTIONS_TOP
+        # Server capabilities, read once per page when the More menu needs them.
+        self.shuffle_kinds = None
+        self.metadata_ai = None
         self.season_settle = Debouncer(self.season_settled, SEASON_SETTLE_SECONDS)
 
     # ------------------------------------------------------------ lifecycle
@@ -108,11 +347,15 @@ class DetailsWindow(xbmcgui.WindowXML):
         if self.initialized:
             return
         self.initialized = True
-        self.show_plot = self.application.options()["show_plot"]
+        options = self.application.options()
+        self.show_plot = options["show_plot"]
+        self.hide_spoilers = bool(options.get("hide_spoilers"))
         self.update_file_selection()
         self.update_subtitle_selection()
         self.load_children()
         self.load_cast()
+        self.load_extras()
+        self.load_facts()
         self.update_actions()
         self.show_hero()
         self.layout_sections()
@@ -188,6 +431,19 @@ class DetailsWindow(xbmcgui.WindowXML):
             item = self.selected(SIMILAR, self.similar)
             if item is not None:
                 self.application.open_item(item)
+        elif control_id in (WATCHLIST, FAVORITE):
+            self.toggle_mark("watchlist" if control_id == WATCHLIST else "favorite")
+        elif control_id == MORE:
+            self.open_more()
+        elif control_id == CAST:
+            person = self.selected(CAST, self.cast)
+            if person is not None and _text(person.get("person_id")):
+                self.application.open_screen("person", person_id=_text(person["person_id"]),
+                                             name=_text(person.get("name")))
+        elif control_id == EXTRAS:
+            entry = self.selected(EXTRAS, self.extras)
+            if entry is not None:
+                self.play_extra(entry)
 
     def selected(self, control_id, items):
         position = self.getControl(control_id).getSelectedPosition()
@@ -258,13 +514,20 @@ class DetailsWindow(xbmcgui.WindowXML):
             START_OVER: self.can_resume,
             VERSION: playable and len(available_versions(self.item)) > 1,
             SUBTITLES: playable and bool(self.subtitle_options()),
+            WATCHLIST: bool(self.item.get("content_id")),
+            FAVORITE: bool(self.item.get("content_id")),
+            MORE: bool(self.item.get("content_id")),
         }
+        marks = svc_personal.state(self.item)
         set_properties(self, {
             "silo.playable": "true" if playable else "",
             "silo.play_label": self.play_label,
             "silo.resume_button": "true" if shown[RESUME] else "",
             "silo.multi_version": "true" if shown[VERSION] else "",
             "silo.continue": "true" if shown[NEXT_UP] else "",
+            "silo.marks": "true" if shown[MORE] else "",
+            "silo.in_watchlist": "true" if marks["watchlist"] else "",
+            "silo.favorite": "true" if marks["favorite"] else "",
         })
         self.update_next_up_label()
         needs_file = (PLAY, RESUME, START_OVER, VERSION)
@@ -318,6 +581,13 @@ class DetailsWindow(xbmcgui.WindowXML):
             return "Version: " + version_label(version) if version else ""
         if control_id == SUBTITLES:
             return self.subtitle_label
+        marks = svc_personal.state(self.item)
+        if control_id == WATCHLIST:
+            return "Remove from watchlist" if marks["watchlist"] else "Add to watchlist"
+        if control_id == FAVORITE:
+            return "Remove from favorites" if marks["favorite"] else "Add to favorites"
+        if control_id == MORE:
+            return "More"
         return ""
 
     # ----------------------------------------------------------------- hero
@@ -334,6 +604,8 @@ class DetailsWindow(xbmcgui.WindowXML):
         version = None if episode is not None else default_version(item, preferred_file_id=self.selected_file_id)
         rating = _text(item.get("content_rating") or (self.item.get("content_rating") if episode else ""))
         overview = _text(item.get("overview") or item.get("description")) if self.show_plot else ""
+        if episode is not None and self.spoiler_hidden(episode):
+            overview = ""
         values = {
             "silo.supertitle": supertitle,
             "silo.title": title.upper(),
@@ -385,6 +657,9 @@ class DetailsWindow(xbmcgui.WindowXML):
         meta = self.getControl(META)
         meta.setPosition(x, META_TOP)
         meta.setWidth(max(1, TEXT_RIGHT - x))
+
+    def spoiler_hidden(self, episode):
+        return self.hide_spoilers and is_unwatched(episode)
 
     def show_focused_episode(self):
         episode = self.selected(EPISODES, self.episodes)
@@ -451,6 +726,10 @@ class DetailsWindow(xbmcgui.WindowXML):
             first, second = present.episode_caption(episode)
             entry.setLabel(first)
             entry.setLabel2(second)
+            if self.spoiler_hidden(episode):
+                # Spoiler protection: no still and no synopsis until the episode is started.
+                entry.setArt({"thumb": "", "poster": "", "fanart": ""})
+                entry.setProperty("silo.plot", "")
             entries.append(entry)
         control.addItems(entries)
         play_id = self.item.get("play_content_id")
@@ -509,11 +788,208 @@ class DetailsWindow(xbmcgui.WindowXML):
         self.layout_sections()
 
     def layout_sections(self):
+        """Stack the sections below the rail: cast, trailers, related, details."""
         has_rail = bool(self.seasons or self.episodes)
-        self.cast_top = SECTIONS_TOP_SERIES if has_rail else SECTIONS_TOP
-        self.similar_top = self.cast_top + (CAST_HEIGHT if self.cast else 0)
+        top = SECTIONS_TOP_SERIES if has_rail else SECTIONS_TOP
+        self.cast_top = top
+        top += CAST_HEIGHT if self.cast else 0
+        self.extras_top = top
+        top += EXTRAS_HEIGHT if self.extras else 0
+        self.similar_top = top
+        top += SIMILAR_HEIGHT if self.similar else 0
+        self.facts_top = top
         self.getControl(CAST_GROUP).setPosition(0, self.cast_top)
+        self.getControl(EXTRAS_GROUP).setPosition(0, self.extras_top)
         self.getControl(SIMILAR_GROUP).setPosition(0, self.similar_top)
+        self.getControl(FACTS_GROUP).setPosition(0, self.facts_top)
+
+    # ----------------------------------------------------- trailers & extras
+    def youtube_available(self):
+        try:
+            return bool(xbmc.getCondVisibility("System.HasAddon({})".format(YOUTUBE_ADDON)))
+        except (AttributeError, RuntimeError):
+            return False
+
+    def load_extras(self):
+        self.extras = trailer_entries(self.item, self.youtube_available())
+        entries = []
+        for extra in self.extras:
+            entry = xbmcgui.ListItem(label=extra["title"], label2=extra["label2"])
+            thumb = extra.get("thumb") or self.photo(extra.get("still"))
+            if thumb:
+                entry.setArt({"thumb": thumb})
+            entries.append(entry)
+        control = self.getControl(EXTRAS)
+        control.reset()
+        control.addItems(entries)
+        self.setProperty("silo.has_extras", "true" if self.extras else "")
+
+    def play_extra(self, entry):
+        if entry["source"] == "youtube":
+            # Trailers hand off to Kodi's YouTube add-on; the row hides them without it.
+            xbmc.Player().play(YOUTUBE_PLAY.format(quote(entry["key"], safe="")))
+            return
+        # A local extra is a catalog item of type "extra" with its own versions.
+        item = self.application.client.item(entry["extra"]["content_id"])
+        if not isinstance(item, dict):
+            return
+        if not self.application.is_playable(item) and item.get("type") == "extra":
+            item = dict(item, type="movie")  # Plays as a single title: no Up Next, no series context.
+        self.application.play(item)
+
+    # ---------------------------------------------------------------- facts
+    def load_facts(self):
+        version = default_version(self.item, preferred_file_id=self.selected_file_id)
+        self.facts = facts(self.item, version)
+        control = self.getControl(FACTS)
+        control.reset()
+        control.addItems([xbmcgui.ListItem(label=label.upper(), label2=value) for label, value in self.facts])
+        self.setProperty("silo.has_facts", "true" if self.facts else "")
+
+    # ------------------------------------------------------- personal marks
+    def set_marks(self, **changes):
+        """Apply watchlist/favorite/played changes to the page item locally."""
+        keys = {"watchlist": "in_watchlist", "favorite": "is_favorite", "watched": "played"}
+        item = dict(self.item)
+        for key in ("user_state", "user_data"):
+            state = dict(item.get(key) or {}) if isinstance(item.get(key), dict) else {}
+            if key == "user_state" or state:
+                for name, value in changes.items():
+                    if key == "user_state" or keys[name] in state:
+                        state[keys[name]] = value
+                item[key] = state
+        self.item = item
+
+    def toggle_mark(self, kind):
+        """Watchlist and Favorite answer 204, so the page flips its own state."""
+        on = not svc_personal.state(self.item)[kind]
+        setter = svc_personal.set_watchlist if kind == "watchlist" else svc_personal.set_favorite
+        setter(self.application.client, self.item["content_id"], on)
+        self.set_marks(**{kind: on})
+        self.update_actions()
+        self.setProperty("silo.hint", self.hint(WATCHLIST if kind == "watchlist" else FAVORITE))
+
+    def toggle_watched(self):
+        on = not svc_personal.state(self.item)["watched"]
+        svc_personal.set_watched(self.application.client, self.item["content_id"], on)
+        # Marking resets progress on the server; read the page and its episodes again.
+        for season in self.seasons:
+            season["user_data"] = dict(season.get("user_data") or {}, played=on)
+        self.refresh(self.selected_file_id)
+        self.reload_children()
+
+    def set_season_watched(self, season, on):
+        svc_personal.set_watched(self.application.client, season["content_id"], on)
+        season["user_data"] = dict(season.get("user_data") or {}, played=on)
+        self.refresh(self.selected_file_id)
+        self.episode_cache.pop(season.get("content_id"), None)
+        if self.seasons and self.seasons[self.season_index] is season:
+            self.show_season(self.season_index)
+
+    def reload_children(self):
+        """Episodes changed on the server: drop the cache and show them again."""
+        if self.item.get("type") == "season":
+            episodes = self.application.guard(lambda: self.application.episodes(self.item))
+            if isinstance(episodes, list):
+                self.set_episodes(episodes)
+        elif self.seasons:
+            self.episode_cache.clear()
+            self.show_season(self.season_index)
+
+    # ------------------------------------------------------------ More menu
+    def current_season(self):
+        if self.item.get("type") == "series" and self.seasons and 0 <= self.season_index < len(self.seasons):
+            return self.seasons[self.season_index]
+        return None
+
+    def can_shuffle(self, kind):
+        if self.shuffle_kinds is None:
+            try:
+                document = svc_shuffle.capability(self.application.client)
+            except Exception:  # Without the capability the menu just leaves shuffle out.
+                document = {}
+            kinds = document.get("scope_kinds") if document.get("state") == "available" else None
+            self.shuffle_kinds = [kind for kind in kinds or [] if isinstance(kind, str)]
+        return kind in self.shuffle_kinds
+
+    def can_translate(self):
+        if not _text(self.item.get("pending_translation_language")):
+            return False
+        if self.metadata_ai is None:
+            try:
+                document = self.application.client.request("GET", "/capabilities/metadata-ai")
+            except Exception:  # Translation is optional; hide it when the server says nothing.
+                document = None
+            self.metadata_ai = document if isinstance(document, dict) else {}
+        return self.metadata_ai.get("state") == "available" and self.metadata_ai.get("on_view", "off") != "off"
+
+    def more_actions(self):
+        """The More menu as (label, action) pairs, in the Android order."""
+        item, actions = self.item, []
+        kind, content_id = item.get("type"), item.get("content_id")
+        season = self.current_season()
+        if kind == "series" and self.can_shuffle("series"):
+            actions.append(("Shuffle series", lambda: self.shuffle(series_id=content_id)))
+        if season is not None and self.can_shuffle("season"):
+            actions.append(("Shuffle " + present.season_label(season),
+                            lambda: self.shuffle(season_id=season["content_id"])))
+        if kind == "season" and self.can_shuffle("season"):
+            actions.append(("Shuffle season", lambda: self.shuffle(season_id=content_id)))
+        watched = svc_personal.state(item)["watched"]
+        actions.append(("Mark as unwatched" if watched else "Mark as watched", self.toggle_watched))
+        if season is not None:
+            played = (season.get("user_data") or {}).get("played") is True
+            actions.append(("Mark {} as {}".format(present.season_label(season), "unwatched" if played else "watched"),
+                            lambda: self.set_season_watched(season, not played)))
+        series_id = _text(item.get("series_id"))
+        if kind == "episode" and series_id:
+            number = item.get("season_number")
+            if isinstance(number, int) and not isinstance(number, bool) and number > 0:
+                actions.append(("Go to season {}".format(number), self.go_to_season))
+        if kind in ("episode", "season") and series_id:
+            actions.append(("Go to series", self.go_to_series))
+        if default_version(item, preferred_file_id=self.selected_file_id):
+            actions.append(("Media info", self.show_media_info))
+        if self.can_translate():
+            actions.append(("Translate description", self.translate_description))
+        return actions
+
+    def open_more(self):
+        actions = self.more_actions()
+        chosen = self.application.dialog.contextmenu([label for label, _ in actions])
+        if isinstance(chosen, int) and 0 <= chosen < len(actions):
+            actions[chosen][1]()
+
+    def shuffle(self, **scope):
+        played = svc_shuffle.play_shuffle(self.application, **scope)
+        if played:
+            self.refresh(self.selected_file_id)
+            self.reload_children()
+
+    def go_to_series(self):
+        self.application.open_item({"content_id": self.item["series_id"]})
+
+    def go_to_season(self):
+        series_id, number = self.item["series_id"], self.item.get("season_number")
+        response = self.application.client.seasons(series_id) or {}
+        season = next((entry for entry in response.get("items", [])
+                       if isinstance(entry, dict) and entry.get("season_number") == number
+                       and entry.get("content_id")), None)
+        self.application.open_item(dict(season, type="season") if season else {"content_id": series_id})
+
+    def show_media_info(self):
+        version = default_version(self.item, preferred_file_id=self.selected_file_id)
+        self.application.dialog.textviewer("Media info", media_info_text(version))
+
+    def translate_description(self):
+        language = _text(self.item.get("pending_translation_language"))
+        self.application.client.request(
+            "POST", "/catalog/items/{}/translate-description".format(quote(str(self.item["content_id"]), safe="")),
+            body={"target_language": language})
+        # The server translates in the background; read the page once more.
+        self.refresh(self.selected_file_id)
+        if _text(self.item.get("pending_translation_language")):
+            self.application.dialog.notification("Silo", "The translated description will appear when it is ready.")
 
     # ----------------------------------------------------------- navigation
     def focused(self):
@@ -537,7 +1013,9 @@ class DetailsWindow(xbmcgui.WindowXML):
             "seasons": bool(self.seasons),
             "episodes": bool(self.episodes),
             "cast": bool(self.cast),
+            "extras": bool(self.extras),
             "similar": bool(self.similar),
+            "facts": bool(self.facts),
         }
         return [zone for zone in ZONES if present_zones[zone]]
 
@@ -569,12 +1047,9 @@ class DetailsWindow(xbmcgui.WindowXML):
         self.scroll_to(zone)
 
     def scroll_to(self, zone):
-        if zone == "cast":
-            offset = max(0, self.cast_top - SECTION_SCROLL_TOP)
-        elif zone == "similar":
-            offset = max(0, self.similar_top - SECTION_SCROLL_TOP)
-        else:
-            offset = 0
+        tops = {"cast": self.cast_top, "extras": self.extras_top, "similar": self.similar_top,
+                "facts": self.facts_top}
+        offset = max(0, tops[zone] - SECTION_SCROLL_TOP) if zone in tops else 0
         if offset != self.scroll_offset:
             self.scroll_offset = offset
             self.getControl(PAGE).setPosition(0, -offset)
