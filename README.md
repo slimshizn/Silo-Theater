@@ -36,11 +36,11 @@ make build
 make repository
 ```
 
-`make build` creates `dist/script.silo-0.2.1.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
+`make build` creates `dist/script.silo-0.2.2.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
-Version **0.2.1** supports **original HTTP direct play**. Titles that require remuxing or transcoding may be refused. Auto-next, a custom player overlay and automatic quality switching are not available.
+Version **0.2.2** supports **original HTTP direct play**. Titles that require remuxing or transcoding may be refused. Auto-next, a custom player overlay and automatic quality switching are not available.
 
 The first time Silo reaches your library it asks **What can this TV show?** and sets the display capability from your answer. Until a device is described, Silo declares SDR with a 1080p ceiling, so HDR and 4K titles are refused with a message that names the setting to change. You can change the answer later under **Settings → Playback → HDR and Dolby Vision capability** and **Maximum video resolution**. Select HDR10 or Dolby Vision only for a compatible device and display. Select **Dolby Vision P7 FEL** only when your hardware, firmware and Kodi build support full enhancement-layer decoding.
 
