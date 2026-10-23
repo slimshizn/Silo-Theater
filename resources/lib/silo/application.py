@@ -240,9 +240,9 @@ class Application:
                                  user_agent="FoundersTheater/" + version if version else "FoundersTheater")
         self.server_name = urlsplit(self.client.server_url).hostname or "Silo"
 
-    # The default display setting declares SDR and 1080p, and this build plays
-    # original files only, so HDR and 4K titles are refused until the device is
-    # described. Ask once, on the first launch that reaches the library.
+    # The default display setting declares SDR and 1080p, so the server converts
+    # HDR and 4K titles until the device is described. Ask once, on the first
+    # launch that reaches the library.
     DISPLAY_CHOICES = (
         ("HD TV or monitor (SDR, up to 1080p)", "auto"),
         ("4K TV with HDR10", "hdr10"),
