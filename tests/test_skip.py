@@ -188,6 +188,15 @@ class ExtrasTests(unittest.TestCase):
         self.assertEqual(self.menu.refreshed, 1)
         self.assertEqual(extras.tick(102, now=15 * 60 + 2), {"stop": "sleep"})
 
+    def test_player_menu_subtitle_picks_are_passed_on_to_be_remembered(self):
+        extras = self.extras()
+        extras.remember_subtitle = MagicMock()
+        self.home[MENU_REQUEST] = "1"
+        extras.tick(100, now=0)
+        self.menu.intents = [{"action": "subtitle_choice", "off": False, "language": "spa"}]
+        extras.tick(101, now=1)
+        extras.remember_subtitle.assert_called_once_with({"off": False, "language": "spa"})
+
     def test_version_intent_stops_with_source_position(self):
         extras = self.extras()
         self.home[MENU_REQUEST] = "1"

@@ -384,6 +384,16 @@ class PlaybackSessionTests(unittest.TestCase):
                 session.progress(bad)
         self.assertEqual(len(client.calls), 2)
 
+    def test_start_requests_the_chosen_audio_and_subtitle(self):
+        client = FakeClient()
+        PlaybackSession(client, options={"audio_track_index": 2, "subtitle_track_index": 1}).start("file-a")
+        body = next(body for _, path, body in client.calls if path == "/playback/start")
+        self.assertEqual((body["audio_track_index"], body["subtitle_track_index"]), (2, 1))
+        client = FakeClient()
+        PlaybackSession(client, options={"subtitles_off": True}).start("file-a")
+        body = next(body for _, path, body in client.calls if path == "/playback/start")
+        self.assertNotIn("subtitle_track_index", body)
+
     def test_slightly_negative_kodi_times_mean_the_start_not_an_error(self):
         # Kodi reports small negative times around seeks and HLS starts; an
         # earlier build stopped playback with "invalid playback time" for them.
@@ -958,7 +968,8 @@ class ControllerTests(KodiHarness):
         self.assertEqual(state.subtitles, [])
         self.assertFalse(any(call[0] == "DOWNLOAD" for call in client.calls))
 
-    def test_embedded_track_beyond_kodis_list_is_left_alone(self):
+    def test_embedded_track_beyond_kodis_list_hides_subtitles(self):
+        # Leaving Kodi alone would let Kodi's own subtitle settings pick a track.
         self.subtitle_streams = ["eng"]
         try:
             client = FakeClient(self.subtitle_decision({
@@ -969,7 +980,7 @@ class ControllerTests(KodiHarness):
         finally:
             del self.subtitle_streams
         self.assertEqual(state.subtitle_selected, [])
-        self.assertEqual(state.visibility, [])
+        self.assertEqual(state.visibility, [False])
 
 
     def audio_decision(self, index):

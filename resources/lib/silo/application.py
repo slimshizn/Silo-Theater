@@ -15,11 +15,15 @@ from .api import ApiError, SiloClient
 from .auth import AuthController, DeviceAuthCancelled, DeviceAuthExpired, NATIVE_PROVIDER_ID
 from .media import available_versions, default_version, format_time, is_multipart, resume_position, version_label, version_name
 from .playback import PlaybackController
-from . import present
+from . import present, track_prefs
 from .present import avatar_image, video_items
 from .settings import read_options
 from .storage import SessionStore, StorageError
 from .ui import DetailsWindow, HomeWindow
+
+
+# play(subtitle_index=AUTO): use the remembered choice or the profile's preferences.
+AUTO = object()
 
 
 class Application:
@@ -653,12 +657,13 @@ class Application:
                 detail["user_data"] = progress
         self._after_playback_item = (self._playback_item_key(item, file_id), detail)
 
-    def play(self, item, resume=None, file_id=None, subtitle_index=None, start_at=None, auto_next=True):
+    def play(self, item, resume=None, file_id=None, subtitle_index=AUTO, start_at=None, auto_next=True):
         """Generic Play follows preferences; explicit Resume/Start keeps its intent.
 
         Return the chosen file so the detail screen can retain it after refresh.
         Resume positions are source seconds, exactly as the catalog reports them.
-        ``subtitle_index`` is a playback subtitle ordinal; None plays without.
+        ``subtitle_index`` is a playback subtitle ordinal, None for Off, or AUTO
+        to use the remembered choice or the profile's subtitle preferences.
         """
         if not self.is_playable(item):
             return None
@@ -668,8 +673,6 @@ class Application:
         if not auto_next:
             # Shuffle and extras pick what plays next themselves.
             options["auto_next"] = False
-        if isinstance(subtitle_index, int) and not isinstance(subtitle_index, bool) and subtitle_index >= 0:
-            options = dict(options, subtitle_track_index=subtitle_index)
         version = default_version(item, options["file_selection"], file_id)
         if not version:
             self.dialog.ok("Silo", "No media files are available for this title.")
@@ -687,6 +690,7 @@ class Application:
         selected_item = self.refresh_item(item, file_id)
         position = self.resume_seconds(selected_item)
         selected_version = default_version(selected_item, preferred_file_id=file_id)
+        options = self._track_options(options, selected_item, selected_version, subtitle_index)
         multipart = is_multipart(selected_version)
         if resume is None and multipart:
             # Silo intentionally avoids applying an item-global offset to a part.
@@ -707,6 +711,8 @@ class Application:
         controller = PlaybackController(self.client, self.addon)
         controller.next_lookup, controller.image = self.next_episode, self.image
         controller.open_screen = self.open_screen
+        # A subtitle picked in the player menu is remembered like one picked on the details screen.
+        controller.remember_subtitle = lambda choice: self.remember_subtitle_language(selected_item, choice)
         controller.subtitle_ai_enabled = self.subtitle_ai_enabled
         try:
             controller.play(selected_item, start_position=start_position, file_id=file_id, options=options,
@@ -729,6 +735,82 @@ class Application:
             # Up next: open the episode fresh so its files, markers and progress are current.
             self.play(self.client.item(action["item"]["content_id"]), resume=True)
         return file_id
+
+    # ---------------------------------------------------------- tracks
+
+    def _track_scope(self):
+        server = self.client.server_url if self.client is not None else ""
+        return "{}|{}".format(server, (self.profile or {}).get("id") or self.store.get("profile_id") or "")
+
+    def _track_choices(self):
+        choices = self.store.get("track_choices") or {}
+        return choices if isinstance(choices, dict) else {}
+
+    def _remembered(self, item):
+        return (self._track_choices().get(self._track_scope()) or {}).get(track_prefs.choice_key(item))
+
+    def _store_choice(self, item, choice):
+        choices = self._track_choices()
+        scope = dict(choices.get(self._track_scope()) or {})
+        key = track_prefs.choice_key(item)
+        if choice is None:
+            scope.pop(key, None)
+        else:
+            scope.pop(key, None)
+            scope[key] = choice
+            while len(scope) > 500:  # Oldest choices go first.
+                scope.pop(next(iter(scope)))
+        choices[self._track_scope()] = scope
+        try:
+            self.store.set("track_choices", choices)
+        except (StorageError, AttributeError):
+            pass
+
+    def _auto_subtitle(self, version):
+        _audio, audio_language = track_prefs.audio_default(version, self.profile)
+        return track_prefs.auto_subtitle(version, self.profile, audio_language)
+
+    def subtitle_default(self, item, version):
+        """(ordinal or None for Off, "remembered" | "auto"): what plays unless the viewer picks."""
+        value = track_prefs.match_choice(version, self._remembered(item))
+        source = "remembered"
+        if value is None:
+            value, source = self._auto_subtitle(version), "auto"
+        return (None if value in (None, track_prefs.OFF) else value), source
+
+    def remember_subtitle(self, item, version, ordinal):
+        """Keep the viewer's pick for this title (or show); a pick equal to the automatic one is not kept."""
+        automatic = self._auto_subtitle(version)
+        automatic = None if automatic in (None, track_prefs.OFF) else automatic
+        if ordinal == automatic:
+            self._store_choice(item, None)
+            return
+        self._store_choice(item, track_prefs.remembered_choice(
+            track_prefs.track_at(version, ordinal) if ordinal is not None else None))
+
+    def remember_subtitle_language(self, item, choice):
+        """A pick from the player menu, where Kodi only reports the stream language."""
+        if not isinstance(choice, dict):
+            return
+        if choice.get("off"):
+            self._store_choice(item, {"kind": "off"})
+        elif track_prefs.language(choice.get("language")):
+            self._store_choice(item, {"kind": "track", "language": track_prefs.language(choice["language"]),
+                                      "forced": False, "hi": False, "external": False})
+
+    def _track_options(self, options, item, version, subtitle_index):
+        """Audio from the profile's language and the subtitle to request (see track_prefs)."""
+        options = dict(options)
+        audio, _language = track_prefs.audio_default(version, self.profile)
+        if audio is not None:
+            options["audio_track_index"] = audio
+        if subtitle_index is AUTO:
+            subtitle_index, _source = self.subtitle_default(item, version)
+        if isinstance(subtitle_index, int) and not isinstance(subtitle_index, bool) and subtitle_index >= 0:
+            options["subtitle_track_index"] = subtitle_index
+        else:
+            options["subtitles_off"] = True
+        return options
 
     def next_episode(self, item):
         """The episode after ``item`` in its series, crossing into the next season."""

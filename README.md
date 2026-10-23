@@ -48,11 +48,11 @@ make build
 make repository
 ```
 
-`make build` creates `dist/script.silo-0.5.7.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
+`make build` creates `dist/script.silo-0.5.8.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
-Version **0.5.7** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** under **Settings → Playback** to limit converted streams.
+Version **0.5.8** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** under **Settings → Playback** to limit converted streams.
 
 ### During playback
 
@@ -64,7 +64,7 @@ When your Silo server has intro, recap or credits markers for a file, a **Skip**
 
 The first time Founders Theater reaches your library it asks **What can this TV show?** and sets the display capability from your answer. Until a device is described, it declares SDR with a 1080p ceiling, so the server converts HDR and 4K titles for this device instead of sending the original file. You can change the answer later under **Settings → This device → More device settings… → Playback → HDR and Dolby Vision capability** and **Maximum video resolution**. Select HDR10 or Dolby Vision only for a compatible device and display. Select **Dolby Vision P7 FEL** only when your hardware, firmware and Kodi build support full enhancement-layer decoding.
 
-Silo chooses the audio track and subtitle for each title; Kodi switches to them itself, so a non-default audio track still plays the original file. If Kodi's decoder stops advancing during playback while the stream keeps arriving, Silo nudges playback a few seconds forward to restart it, at most three times in a row. Subtitle files are downloaded by the add-on and given to Kodi as local files, so your sign-in never appears in Kodi's log.
+Audio and subtitles follow your Silo profile's preferences, the same way the Silo apps choose them: the audio language from your profile (then English), and subtitles from your subtitle mode and language (Automatic shows subtitles when the audio is in another language, and only forced subtitles when it is yours). The details screen shows the choice, marked **(Auto)** when it comes from your profile. If you pick a different subtitle, or Off, on the details screen or in the player menu, Founders Theater remembers it for that title, and for a show it carries over to the following episodes. Kodi switches to the chosen tracks itself, so a non-default audio track still plays the original file. If Kodi's decoder stops advancing during playback while the stream keeps arriving, Silo nudges playback a few seconds forward to restart it, at most three times in a row. Subtitle files are downloaded by the add-on and given to Kodi as local files, so your sign-in never appears in Kodi's log.
 
 ### Playback stops after a few seconds
 

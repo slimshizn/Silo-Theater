@@ -177,6 +177,7 @@ class PlaybackExtras:
     def __init__(self, player, item, version, plan, options, skip_button=None, up_next=None,
                  menu_factory=None, home=None, notify=None, next_lookup=None, image=None,
                  versions=(), file_id=None, save_setting=None, log=None, clock=time.monotonic,
+                 remember_subtitle=None,
                  streak=None, seek=None, ai_enabled=None):
         self.player = player
         self.item, self.version, self.plan = item, version or {}, plan or {}
@@ -188,6 +189,7 @@ class PlaybackExtras:
         self.next_lookup, self.image = next_lookup, image
         self.versions, self.file_id = list(versions), file_id
         self.save_setting = save_setting or (lambda key, value: None)
+        self.remember_subtitle = remember_subtitle
         self.log = log or (lambda event, position=None: None)
         self.clock = clock
         self.streak = streak if streak is not None else WatchStreak()
@@ -362,6 +364,11 @@ class PlaybackExtras:
                 minutes = max(0, int(intent.get("minutes") or 0))
                 self.sleep_deadline = now + minutes * 60 if minutes else None
                 self.notify("Sleep timer: {} min".format(minutes) if minutes else "Sleep timer off")
+            elif action == "subtitle_choice" and callable(self.remember_subtitle):
+                try:
+                    self.remember_subtitle({"off": bool(intent.get("off")), "language": intent.get("language")})
+                except Exception:  # Remembering is a convenience; never disturb playback.
+                    pass
             elif action in ("skip_prompts", "auto_next"):
                 self.options[action] = bool(intent.get("value"))
                 self.save_setting(action, "true" if self.options[action] else "false")

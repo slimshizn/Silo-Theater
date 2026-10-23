@@ -175,7 +175,7 @@ def _bandwidth_cap(options):
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.5.7", options=None):
+    def __init__(self, client, mode="auto", version="0.5.8", options=None):
         self.client, self.mode, self.version = client, mode, version
         self.options = dict(options or {})
         # /api/v2 calls this installation_id, but it identifies the SERVER.
@@ -242,6 +242,10 @@ class PlaybackSession:
             body["bandwidth_cap_kbps"] = cap
         if start_position is not None:
             body["start_position"] = _position(start_position)
+        audio = self.options.get("audio_track_index")
+        if isinstance(audio, int) and not isinstance(audio, bool) and audio >= 0:
+            # The profile's audio language, chosen like the Silo apps do (track_prefs).
+            body["audio_track_index"] = audio
         # Without a subtitle field Silo plans subtitles off.
         track = self.options.get("subtitle_track_index")
         if (isinstance(track, int) and not isinstance(track, bool) and track >= 0
@@ -748,6 +752,8 @@ class PlaybackController:
         # tools, and a callable telling whether AI subtitle translation is on.
         self.open_screen = None
         self.subtitle_ai_enabled = None
+        # Set by the application: remember a subtitle picked in the player menu.
+        self.remember_subtitle = None
         # Why playback stopped for something else: next episode, version, sleep.
         self.next_action = None
         self.loaded_subtitle = None
@@ -775,7 +781,7 @@ class PlaybackController:
             player, item, version, plan, options, skip_button=SkipButton(path), up_next=UpNextCard(path),
             menu_factory=lambda: PlayerMenu(path), home=xbmcgui.Window(10000), notify=notify,
             next_lookup=self.next_lookup, image=self.image, versions=available_versions(item),
-            file_id=effective, save_setting=self.addon.setSetting,
+            file_id=effective, save_setting=self.addon.setSetting, remember_subtitle=self.remember_subtitle,
             log=lambda event, position=None: log_event(event, position),
             streak=self.streak, seek=seek, ai_enabled=ai_enabled)
 
@@ -1007,7 +1013,9 @@ class PlaybackController:
                 if not player.finished and 0 <= audio_index < len(streams):
                     player.setAudioStream(audio_index)
             if not player.finished:
-                if options.get("subtitle_mode", "server") == "off" or subtitle.get("mode") == "off":
+                if (options.get("subtitle_mode", "server") == "off" or options.get("subtitles_off")
+                        or subtitle.get("mode") in (None, "off")):
+                    # Off means off: Kodi's own subtitle language settings must not turn one on.
                     player.showSubtitles(False)
                 elif subtitle_path:
                     player.setSubtitles(subtitle_path)
@@ -1017,6 +1025,11 @@ class PlaybackController:
                     if not player.finished and 0 <= embedded_index < len(streams):
                         player.setSubtitleStream(embedded_index)
                         player.showSubtitles(True)
+                    elif not player.finished:
+                        player.showSubtitles(False)
+                elif subtitle.get("mode") != "burn_in":
+                    # Nothing Kodi should show (a burned-in subtitle is part of the picture).
+                    player.showSubtitles(False)
             return "started"
 
         native_only = False

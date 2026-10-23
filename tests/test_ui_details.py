@@ -230,6 +230,19 @@ class DetailsWindowTests(unittest.TestCase):
         self.assertEqual(self.app.play.call_args.kwargs["file_id"], "file-a")
         self.app.choose_file.assert_not_called()
 
+    def test_subtitle_starts_from_preferences_and_a_pick_is_remembered(self):
+        self.app.subtitle_default.return_value = (1, "auto")
+        window = self.window(self.subtitled_item())
+        window.onInit()
+        self.assertTrue(window.properties["silo.subtitle_label"].endswith("(Auto)"))
+        self.app.choose_subtitle.side_effect = lambda choices, current: None  # Off
+        window.onClick(106)
+        self.assertEqual(window.properties["silo.subtitle_label"], "Subtitles: Off")
+        self.assertIsNone(self.app.remember_subtitle.call_args.args[2])
+        self.app.play.return_value = "file-a"
+        window.onClick(100)
+        self.assertIsNone(self.app.play.call_args.kwargs["subtitle_index"])
+
     def test_subtitle_button_lists_tracks_and_play_sends_the_choice(self):
         window = self.window(self.subtitled_item())
         window.onInit()

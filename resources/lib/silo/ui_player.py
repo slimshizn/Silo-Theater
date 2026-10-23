@@ -650,6 +650,9 @@ class PlayerMenuWindow(xbmcgui.WindowXMLDialog):
             else:
                 player_call("setSubtitleStream", row["index"])
                 player_call("showSubtitles", True)
+            # Kodi names embedded streams by language; remember the pick for this title or show.
+            self.menu.queue({"action": "subtitle_choice", "off": row["index"] < 0,
+                             "language": row.get("language") or row.get("label")})
             self.redraw()
         elif key == "chapter":
             player_call("seekTime", float(row["seconds"]))

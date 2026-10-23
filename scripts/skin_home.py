@@ -381,7 +381,7 @@ def browse():
     glow = group(None, 0, 0, 1920, 1080, [
         image(480, 270, 1440, 810, "brand_light.png", aspect="stretch"),
         image(0, 0, 960, 1080, "scrim_left.png", color=BLACK),
-    ], condition="String.IsEqual({0},movies) | String.IsEqual({0},series)".format(tab))
+    ], condition="String.IsEqual({0},movies) | String.IsEqual({0},series) | String.IsEqual({0},search)".format(tab))
     return group(700, 0, 0, 1920, 1080, [
         glow, library, search, grid,
         label(88, 560, 1744, 60, "$INFO[Window.Property(silo.empty)]", "font27", MUTED, "center", control_id=550),

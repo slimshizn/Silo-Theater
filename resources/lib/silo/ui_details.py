@@ -311,7 +311,9 @@ class DetailsWindow(xbmcgui.WindowXML):
         self.selected_file_id = None
         self.file_confirmed = False
         # Playback ordinal of the chosen subtitle; None plays without subtitles.
+        # It starts from the remembered choice or the profile's preferences.
         self.subtitle_index = None
+        self.subtitle_source = "auto"
         self.can_resume = False
         self.show_plot = True
         self.hide_spoilers = False
@@ -351,6 +353,7 @@ class DetailsWindow(xbmcgui.WindowXML):
         self.show_plot = options["show_plot"]
         self.hide_spoilers = bool(options.get("hide_spoilers"))
         self.update_file_selection()
+        self.default_subtitle()
         self.update_subtitle_selection()
         self.load_children()
         self.load_cast()
@@ -407,7 +410,11 @@ class DetailsWindow(xbmcgui.WindowXML):
             choices = self.subtitle_options()
             chosen = self.application.choose_subtitle(choices, self.subtitle_index)
             if chosen is not False:
-                self.subtitle_index = chosen
+                self.subtitle_index, self.subtitle_source = chosen, "picked"
+                version = default_version(self.item, preferred_file_id=self.selected_file_id)
+                remember = getattr(self.application, "remember_subtitle", None)
+                if callable(remember):
+                    self.application.guard(lambda: remember(self.item, version, chosen))
                 self.update_subtitle_selection()
                 self.setProperty("silo.hint", self.hint(SUBTITLES))
         elif control_id == NEXT_UP and self.item.get("play_content_id"):
@@ -464,12 +471,25 @@ class DetailsWindow(xbmcgui.WindowXML):
         version = default_version(self.item, preferred_file_id=self.selected_file_id)
         return subtitle_choices(version)
 
+    def default_subtitle(self):
+        """Start from the remembered choice or the profile's subtitle preferences."""
+        version = default_version(self.item, preferred_file_id=self.selected_file_id)
+        try:
+            index, source = self.application.subtitle_default(self.item, version)
+        except (AttributeError, TypeError, ValueError):
+            index, source = None, "auto"
+        self.subtitle_index = index if isinstance(index, int) and not isinstance(index, bool) else None
+        self.subtitle_source = source if source in ("auto", "remembered") else "auto"
+
     def update_subtitle_selection(self):
         choices = dict(self.subtitle_options())
         if self.subtitle_index not in choices:
             self.subtitle_index = None
         self.setProperty("silo.has_subtitles", "true" if choices else "")
-        self.subtitle_label = "Subtitles: " + choices.get(self.subtitle_index, "Off")
+        label = choices.get(self.subtitle_index, "Off")
+        if self.subtitle_index is not None and self.subtitle_source == "auto":
+            label += " (Auto)"  # Chosen from the profile's subtitle preferences.
+        self.subtitle_label = "Subtitles: " + label
         self.setProperty("silo.subtitle_label", self.subtitle_label)
 
     def update_resume(self):
@@ -486,11 +506,13 @@ class DetailsWindow(xbmcgui.WindowXML):
     def refresh(self, file_id, after_playback=False):
         item = (self.application.item_after_playback(self.item, file_id) if after_playback
                 else self.application.refresh_item(self.item, file_id))
-        if file_id != self.selected_file_id:
-            # Another version has its own subtitle tracks.
-            self.subtitle_index = None
+        changed_file = file_id != self.selected_file_id
         self.item = item
         self.selected_file_id = file_id
+        if changed_file or after_playback:
+            # Another version has its own tracks, and a pick made in the player
+            # menu during playback is now the remembered choice.
+            self.default_subtitle()
         self.file_confirmed = any(version["file_id"] == file_id for version in available_versions(item))
         self.update_file_selection()
         self.update_subtitle_selection()
