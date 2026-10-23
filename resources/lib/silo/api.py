@@ -245,10 +245,7 @@ class SiloClient:
         status, response_headers, data = send(method, url, headers, body)
         self._check_scope()
         if status == 401 and authenticated and retry_auth and self.store.get("refresh_token"):
-            # Serialize rotations. A concurrent caller may have already refreshed.
-            with self._lock:
-                if headers.get("Authorization") == "Bearer " + (self.store.get("access_token") or ""):
-                    self.refresh()
+            self.refresh_if_current(headers)
             return self.request(method, path, body, authenticated, profile, params, retry_auth=False)
         if not 200 <= status < 300:
             problem = data if isinstance(data, dict) else {}
@@ -280,9 +277,7 @@ class SiloClient:
         status, response_headers, data = download(target, headers, max_bytes)
         self._check_scope()
         if status == 401 and retry_auth and self.store.get("refresh_token"):
-            with self._lock:
-                if headers.get("Authorization") == "Bearer " + (self.store.get("access_token") or ""):
-                    self.refresh()
+            self.refresh_if_current(headers)
             return self.download(url, max_bytes, retry_auth=False)
         if not 200 <= status < 300:
             raise ApiError(status, "Silo returned HTTP {}.".format(status), "download_failed", response_headers)
@@ -348,6 +343,12 @@ class SiloClient:
         result = self.request("POST", "/auth/login", body, authenticated=False, profile=False)
         self._save_tokens(result, method="password", reset_profile=True)
         return result
+
+    def refresh_if_current(self, headers):
+        """Renew after a 401 unless a concurrent caller already rotated the token."""
+        with self._lock:
+            if headers.get("Authorization") == "Bearer " + (self.store.get("access_token") or ""):
+                self.refresh()
 
     def refresh(self):
         with self._lock:

@@ -581,6 +581,21 @@ class ResumeGuardTests(unittest.TestCase):
             select_file({"files": [{"file_id": "bad", "unreadable": True}]})
 
 
+class FakeRelay:
+    """Stands in for the loopback relay; records what it was asked to serve."""
+
+    def __init__(self, client):
+        self.routes, self.closed = [], False
+        FakeRelay.last = self
+
+    def register(self, url, headers):
+        self.routes.append((url, headers))
+        return "http://127.0.0.1:9/relay/" + url.rsplit("/", 1)[-1]
+
+    def close(self):
+        self.closed = True
+
+
 class KodiHarness(unittest.TestCase):
     def run_player(self, client, events, start=None, options=None, file_id=None):
         """Exercise the real controller against a Kodi callback/event double."""
@@ -713,6 +728,8 @@ class KodiHarness(unittest.TestCase):
         with patch.dict(sys.modules, {"xbmc": xbmc, "xbmcgui": xbmcgui, "xbmcvfs": xbmcvfs}), \
                 patch("silo.playback.time.monotonic", side_effect=lambda: state.now):
             controller = PlaybackController(client, addon)
+            controller.relay_factory = FakeRelay
+            FakeRelay.last = None
             state.controller = controller
             if getattr(self, "configure", None):
                 self.configure(controller, state)
@@ -1333,6 +1350,24 @@ class KodiMediaUrlTests(unittest.TestCase):
             with self.subTest(url=value), self.assertRaises(PlaybackError):
                 kodi_media_url("https://silo.invalid", {"url": value})
 
+    def test_only_media_the_server_serves_itself_goes_through_the_relay(self):
+        relayed = []
+        relay = lambda url, headers: relayed.append(url) or "http://127.0.0.1:9/r/x"
+        for target in ("/api/v2/stream/s1?st=a", "https://silo.invalid/api/v2/playback/transcode/s1/master.m3u8"):
+            with self.subTest(target=target):
+                self.assertEqual(kodi_media_url("https://silo.invalid", {"url": target}, relay=relay),
+                                 "http://127.0.0.1:9/r/x")
+        for target in ("https://node.invalid/stream/transcode/signed/master.m3u8", "/media/file?signature=x",
+                       "http://silo.invalid/api/v2/stream/s1", "https://silo.invalid:8443/api/v2/stream/s1"):
+            with self.subTest(target=target):
+                self.assertNotIn("127.0.0.1", kodi_media_url("https://silo.invalid", {"url": target}, relay=relay))
+        self.assertEqual(len(relayed), 2)
+        # A reverse-proxy prefix is part of the server address.
+        self.assertEqual(kodi_media_url("https://silo.invalid/silo", {"url": "/silo/api/v2/stream/s1"}, relay=relay),
+                         "http://127.0.0.1:9/r/x")
+        self.assertNotIn("127.0.0.1", kodi_media_url("https://silo.invalid/silo", {"url": "/api/v2/stream/s1"},
+                                                     relay=relay))
+
     def test_signed_relative_url_does_not_gain_account_credentials(self):
         stream = {"url": "/media/file?signature=route-token", "headers": {}, "header_refresh": "none"}
         self.assertEqual(kodi_media_url("https://silo.invalid", stream), "https://silo.invalid/media/file?signature=route-token")
@@ -1593,8 +1628,11 @@ class ConvertedControllerTests(KodiHarness):
         finally:
             del self.audio_streams
         self.assertEqual(state.dialogs, [])
-        self.assertEqual(state.plays, ["https://silo.invalid/api/v2/playback/transcode/%s/master.m3u8?st=opaque"
-                                       % SESSION])
+        # The server converts it itself, so Kodi plays it through the loopback relay.
+        self.assertEqual(state.plays, ["http://127.0.0.1:9/relay/master.m3u8?st=opaque"])
+        self.assertEqual(FakeRelay.last.routes,
+                         [("https://silo.invalid/api/v2/playback/transcode/%s/master.m3u8?st=opaque" % SESSION, {})])
+        self.assertTrue(FakeRelay.last.closed)
         self.assertEqual(state.listitem_props["<mime>"], "application/vnd.apple.mpegurl")
         self.assertNotIn("inputstream", state.listitem_props)
         self.assertEqual(state.audio_selected, [])
@@ -1764,12 +1802,23 @@ class ConvertedControllerTests(KodiHarness):
         self.assertEqual(len(state.notices), 1)
         self.assertFalse(getattr(state, "pauses", 0))
 
-    def test_resume_backs_up_by_the_rewind_setting(self):
-        client = FakeClient(playable_decision(source_start=173, player_start=173))
-        self.run_player(client, [(173, None), (174, "stop")], start=180,
-                        options={"resume_rewind": 7, "subtitle_mode": "server"})
+    def test_resume_backs_up_by_the_rewind_setting_in_kodi_only(self):
+        # The server keeps the saved position, so a failed start cannot move it back.
+        client = FakeClient(playable_decision(source_start=180, player_start=180))
+        state = self.run_player(client, [(173, None), (174, "stop")], start=180,
+                                options={"resume_rewind": 7, "subtitle_mode": "server"})
         body = next(body for _, path, body in client.calls if path == "/playback/start")
-        self.assertEqual(body["start_position"], 173)
+        self.assertEqual(body["start_position"], 180)
+        self.assertEqual(state.listitem_props.get("StartOffset"), "173.000")
+        self.assertEqual(state.seeks, [173])
+
+    def test_rewind_never_goes_before_the_start_of_the_stream(self):
+        client = FakeClient(playable_decision(source_start=3, player_start=3))
+        state = self.run_player(client, [(0.5, None), (1, "stop")], start=3,
+                                options={"resume_rewind": 7, "subtitle_mode": "server"})
+        self.assertEqual(next(body for _, path, body in client.calls if path == "/playback/start")["start_position"], 3)
+        self.assertNotIn("StartOffset", state.listitem_props)
+        self.assertEqual(state.seeks, [])
 
     def test_explicit_start_positions_are_not_rewound(self):
         self.exact_start = True

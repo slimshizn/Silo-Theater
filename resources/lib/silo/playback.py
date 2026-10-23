@@ -114,11 +114,27 @@ def _position(value):
     return max(0.0, value)
 
 
-def kodi_media_url(server_url, stream):
+# Media routes the Silo API serves itself. They need the account's sign-in
+# token on every request, so they play through the loopback relay (relay.py).
+SERVER_MEDIA_PATHS = ("/api/v2/stream/", "/api/v1/stream/", "/api/v2/playback/transcode/",
+                      "/api/v1/playback/transcode/")
+
+
+def served_by_server(server_url, url):
+    """True when ``url`` is a media route on the Silo server itself, not a proxy node."""
+    parts, server = urlsplit(url), urlsplit(server_url)
+    origin = lambda p: (p.scheme.lower(), p.hostname, p.port or (443 if p.scheme == "https" else 80))
+    base = server.path.rstrip("/")
+    return origin(parts) == origin(server) and parts.path.startswith(tuple(base + path for path in SERVER_MEDIA_PATHS))
+
+
+def kodi_media_url(server_url, stream, relay=None):
     """Encode only server-issued headers, without adding account credentials.
 
     Kodi cannot swap bearer headers on an already open media item, so this
     client deliberately does not negotiate header_authenticated_media_v1.
+    ``relay(url, headers)`` returns a loopback URL for media the server serves
+    itself; signed proxy-node URLs always go to Kodi directly.
     """
     source_url = stream.get("url", "")
     if not isinstance(source_url, str) or any(char in source_url for char in ("|", "\\", "\r", "\n", "\t", "\x00")):
@@ -142,6 +158,8 @@ def kodi_media_url(server_url, stream):
     for key, value in headers.items():
         if any(char in str(key) + str(value) for char in ("\r", "\n")):
             raise PlaybackError("The server returned invalid media headers.")
+    if relay is not None and served_by_server(server_url, url):
+        return relay(url, headers)
     origin = lambda p: (p.scheme.lower(), p.hostname, p.port or (443 if p.scheme == "https" else 80))
     if headers and origin(parts) != origin(server):
         # Cross-origin authenticated media requires explicit origin negotiation,
@@ -175,7 +193,7 @@ def _bandwidth_cap(options):
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.5.9", options=None):
+    def __init__(self, client, mode="auto", version="0.6.0", options=None):
         self.client, self.mode, self.version = client, mode, version
         self.options = dict(options or {})
         # /api/v2 calls this installation_id, but it identifies the SERVER.
@@ -757,6 +775,8 @@ class PlaybackController:
         # Why playback stopped for something else: next episode, version, sleep.
         self.next_action = None
         self.loaded_subtitle = None
+        # Builds the loopback relay for media the server serves itself.
+        self.relay_factory = None
 
     def _extras(self, player, item, plan, options, file_id, log_event, seek=None, ai_enabled=None):
         """Overlays for this playback, or None where Kodi cannot draw them."""
@@ -818,7 +838,9 @@ class PlaybackController:
 
         A saved resume point is backed up by ``options["resume_rewind"]``
         seconds unless ``exact_start`` says the position is a deliberate one
-        (a chapter or the place a version switch left off).
+        (a chapter or the place a version switch left off). The rewind is
+        applied in Kodi only: the server gets the saved position, so a start
+        that fails cannot move the viewer's resume point.
         """
         import xbmc
         import xbmcgui
@@ -829,8 +851,9 @@ class PlaybackController:
         self.last_reporter = None
         self.loaded_subtitle = None
         condition = getattr(xbmc, "getCondVisibility", None)
-        if not exact_start:
-            start_position = rewound_start(start_position, options.get("resume_rewind", 0))
+        rewind = 0.0
+        if not exact_start and start_position is not None:
+            rewind = _position(start_position) - rewound_start(start_position, options.get("resume_rewind", 0))
 
         class Player(xbmc.Player):
             # Kodi dispatches these asynchronously. Callbacks only change Python
@@ -932,11 +955,23 @@ class PlaybackController:
                 return _position(latest_sample[0] + latest_sample[2])
             return session.position
 
+        media_relay = None
+
+        def relay(url, headers):
+            nonlocal media_relay
+            if media_relay is None:
+                factory = self.relay_factory
+                if factory is None:
+                    from .relay import MediaRelay as factory
+                media_relay = factory(self.client)
+                log_event("media_relay")
+            return media_relay.register(url, headers)
+
         def mount(plan, switching):
             """Hand one plan's stream to Kodi; "started", "failed", "finished" or "aborted"."""
             nonlocal opened, stage, guard, used_adaptive
             converted = is_converted(plan)
-            path = kodi_media_url(self.client.server_url, plan["stream"])
+            path = kodi_media_url(self.client.server_url, plan["stream"], relay=relay)
             # Subtitle setup, including any credential refresh, happens before
             # media opens. Sidecars are saved locally so Kodi never receives a
             # URL carrying the sign-in or profile token. An HLS transport has no
@@ -956,6 +991,9 @@ class PlaybackController:
                 path, _, headers = path.partition("|")
             listitem = xbmcgui.ListItem(label=item.get("title", "Silo"), path=path)
             planned_start = _number(plan["timeline"]["player_start_seconds"], field="timeline.player_start_seconds")
+            if not switching:
+                # Resume rewind, locally; a switch continues where the viewer is.
+                planned_start = max(0.0, planned_start - rewind)
             if planned_start > 0:
                 # Kodi opens the stream at the saved position instead of playing
                 # from 0:00 and seeking afterwards, which a converted stream may
@@ -1000,7 +1038,7 @@ class PlaybackController:
             if player.finished:
                 return "finished"
             log_event("av_started")
-            start = _number(plan["timeline"]["player_start_seconds"], field="timeline.player_start_seconds")
+            start = planned_start
             guard = ResumeGuard(start, timeout=RESUME_TIMEOUT_CONVERTED if converted else RESUME_TIMEOUT)
             stage = "resume_seek"
             if start and not player_near(player, start):
@@ -1315,6 +1353,8 @@ class PlaybackController:
             if extras is not None:
                 extras.close()
             stop_local()
+            if media_relay is not None:
+                media_relay.close()
             source = session.position
             if latest_sample is not None and session.plan:
                 source = source_position()
