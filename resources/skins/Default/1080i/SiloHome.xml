@@ -5717,7 +5717,7 @@
           <top>292</top>
           <width>112</width>
           <height>56</height>
-          <texture border="30">pill60_selected.png</texture>
+          <texture border="28">pill56_selected.png</texture>
           <visible>String.IsEqual(Window.Property(silo.search_type),video) + !Control.HasFocus(530)</visible>
         </control>
         <control type="button" id="530">
@@ -5751,7 +5751,7 @@
           <top>292</top>
           <width>150</width>
           <height>56</height>
-          <texture border="30">pill60_selected.png</texture>
+          <texture border="28">pill56_selected.png</texture>
           <visible>String.IsEqual(Window.Property(silo.search_type),movie) + !Control.HasFocus(531)</visible>
         </control>
         <control type="button" id="531">
@@ -5785,7 +5785,7 @@
           <top>292</top>
           <width>140</width>
           <height>56</height>
-          <texture border="30">pill60_selected.png</texture>
+          <texture border="28">pill56_selected.png</texture>
           <visible>String.IsEqual(Window.Property(silo.search_type),series) + !Control.HasFocus(532)</visible>
         </control>
         <control type="button" id="532">

@@ -358,7 +358,7 @@ def browse():
     for index, (control_id, kind, text, width) in enumerate(SEARCH_CHIPS):
         selected = "String.IsEqual(Window.Property(silo.search_type),{})".format(kind)
         chips += [image(left, 292, width, 56, "pill56_idle.png", border=28, condition="!" + selected),
-                  image(left, 292, width, 56, "pill60_selected.png", border=30,
+                  image(left, 292, width, 56, "pill56_selected.png", border=28,
                         condition="{} + !Control.HasFocus({})".format(selected, control_id)),
                   button(control_id, left, 292, width, 56, text, focus="pill56.png", focus_border=28,
                          navigation=nav(control_id, up=520, down=500,

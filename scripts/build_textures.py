@@ -299,6 +299,7 @@ def textures():
         "pill52_idle.png": rounded((104, 52), 26, fill=0.05, line=0.30, line_width=2),
         "pill52_selected.png": rounded((104, 52), 26, fill=0.20, line=0.70, line_width=2),
         "pill56_idle.png": rounded((112, 56), 28, fill=0.08),
+        "pill56_selected.png": rounded((112, 56), 28, fill=0.14, line=0.10, line_width=1),
         "pill60_selected.png": rounded((120, 60), 30, fill=0.14, line=0.10, line_width=1),
         "pill76_idle.png": rounded((152, 76), 38, fill=0.10, line=0.34, line_width=3),
         "circle_idle.png": ellipse((152, 152), fill=0.10, line=0.34, line_width=3),
