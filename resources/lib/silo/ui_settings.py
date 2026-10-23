@@ -95,7 +95,7 @@ ACCOUNT = ("Account", (
     row(ACTION, "Manage profiles", "manage_profiles", hint="Add, change or delete the profiles on this account."),
     row(ACTION, "Send diagnostics report", "diagnostics",
         hint="Sends this device's versions and Founders Theater settings to the server's administrator."),
-    row(ACTION, "Switch server", "server", hint="Signs out and connects to another Silo server."),
+    row(ACTION, "Switch server", "server"),
     row(ACTION, "Sign out", "logout"),
 ))
 PROFILE_KINDS = (TOGGLE, CHOICE)
@@ -375,7 +375,7 @@ class SettingsWindow(xbmcgui.WindowXML):
         elif key == "diagnostics":
             application.guard(lambda: send_diagnostics(application))
         elif key == "server":
-            if dialog.yesno("Switch server", "Sign out of this Silo server and connect to another one?"):
+            if dialog.yesno("Switch server", "Connect to another Silo server? You stay signed in to this one."):
                 self.result = "server"
                 self.close()
         elif key == "logout":

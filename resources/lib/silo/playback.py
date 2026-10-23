@@ -193,7 +193,7 @@ def _bandwidth_cap(options):
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.6.0", options=None):
+    def __init__(self, client, mode="auto", version="0.6.1", options=None):
         self.client, self.mode, self.version = client, mode, version
         self.options = dict(options or {})
         # /api/v2 calls this installation_id, but it identifies the SERVER.
