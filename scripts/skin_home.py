@@ -376,8 +376,14 @@ def browse():
         label(544, 164, 900, 104, "Search movies, series…", "font27", "8AEDEDED",
               condition="String.IsEmpty({})".format(query)),
     ] + chips + [people_row()], condition="String.IsEqual({},search)".format(tab))
+    # The sign-in screens' blue, red and orange light behind the library grid, with
+    # the same fade from the left so chips and captions stay readable.
+    glow = group(None, 0, 0, 1920, 1080, [
+        image(480, 270, 1440, 810, "brand_light.png", aspect="stretch"),
+        image(0, 0, 960, 1080, "scrim_left.png", color=BLACK),
+    ], condition="String.IsEqual({0},movies) | String.IsEqual({0},series)".format(tab))
     return group(700, 0, 0, 1920, 1080, [
-        library, search, grid,
+        glow, library, search, grid,
         label(88, 560, 1744, 60, "$INFO[Window.Property(silo.empty)]", "font27", MUTED, "center", control_id=550),
     ], condition="!String.IsEmpty({0}) + !String.IsEqual({0},home)".format(tab))
 

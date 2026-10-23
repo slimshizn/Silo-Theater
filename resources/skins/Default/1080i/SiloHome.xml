@@ -5328,6 +5328,28 @@
       <width>1920</width>
       <height>1080</height>
       <visible>!String.IsEmpty(Window.Property(silo.tab)) + !String.IsEqual(Window.Property(silo.tab),home)</visible>
+      <control type="group">
+        <left>0</left>
+        <top>0</top>
+        <width>1920</width>
+        <height>1080</height>
+        <visible>String.IsEqual(Window.Property(silo.tab),movies) | String.IsEqual(Window.Property(silo.tab),series)</visible>
+        <control type="image">
+          <left>480</left>
+          <top>270</top>
+          <width>1440</width>
+          <height>810</height>
+          <aspectratio>stretch</aspectratio>
+          <texture>brand_light.png</texture>
+        </control>
+        <control type="image">
+          <left>0</left>
+          <top>0</top>
+          <width>960</width>
+          <height>1080</height>
+          <texture colordiffuse="FF000000">scrim_left.png</texture>
+        </control>
+      </control>
       <control type="group" id="710">
         <left>0</left>
         <top>0</top>
