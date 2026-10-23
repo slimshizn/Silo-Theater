@@ -18,7 +18,7 @@ Founders Theater is a community project. It is not an official Silo app and is n
 - Skip Intro, Skip Recap and Skip Credits from your server's markers, with your profile's auto-skip settings.
 - Up next with a countdown, Are you still watching?, and rewind when resuming.
 - A Silo player menu during playback: info, stats, version, quality, speed, aspect, sleep timer, audio, subtitles (including online search, AI translation and sync to audio) and chapters.
-- Silo Settings for your profile and this device; switch between several Silo servers.
+- Settings for your profile and this device (profile menu → **Settings**); switch between several Silo servers.
 - Widgets for Kodi's own home screen with the optional **Founders Theater Widgets** add-on: your Silo rows, Watchlist and Favorites.
 
 ## Install in Kodi
@@ -34,13 +34,13 @@ For Silo rows on Kodi's own home screen, also install **Founders Theater Widgets
 
 You can also [download the repository installer](https://slimshizn.github.io/Silo-Theater/repository.silo.theater-1.0.2.zip) in a browser and transfer it to your Kodi device.
 
-On a movie or episode's details screen, **Play** follows your resume preference and shows the resume time when there is one; the round **Start over** button restarts the title. The round **Version** button appears when a title has more than one file and **Subtitles** lets you pick a track, or Off, before you press play; the line under the buttons shows the current choice. A series page plays its next episode directly. Resume points belong to your selected Silo profile.
+On a movie or episode's details screen, **Play** follows your resume preference and shows the resume time when there is one; the round **Start over** button restarts the title. The round **Version** button appears when a title has more than one file and **Subtitles** lets you pick a track, or Off, before you press play; the line under the buttons shows the current choice. **Watchlist** and **Favorite** toggle those lists, and **More** offers Mark watched, Go to series or season, Shuffle and Media info. A series page plays its next episode directly. Resume points belong to your selected Silo profile.
 
 Text uses your Kodi skin's font, because Kodi add-ons cannot bring their own.
 
 ## Build from source
 
-Build from source using **Python 3.9 or newer**. No third-party Python packages are required.
+Build from source using **Python 3.9 or newer**. Building and testing need no third-party Python packages; only regenerating the skin images (`python3 scripts/build_textures.py`) needs Pillow.
 
 ```sh
 make check
@@ -52,17 +52,17 @@ make repository
 
 ## Playback compatibility
 
-Version **0.5.6** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** in Settings to limit converted streams.
+Version **0.5.6** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** under **Settings → Playback** to limit converted streams.
 
 ### During playback
 
-Press **Back** to stop a Silo video and return to Founders Theater, as in the Silo apps (turn off **Back stops playback** in Silo Settings → This device to keep Kodi's background playback). Turn on **Match frame rate** there, or answer yes when Founders Theater first asks, to switch the TV to each video's frame rate; Kodi pauses 2 seconds while the TV switches.
+Press **Back** to stop a Silo video and return to Founders Theater, as in the Silo apps (turn off **Back stops playback** in **Settings → This device** to keep Kodi's background playback). Turn on **Match frame rate** there, or answer yes when Founders Theater first asks, to switch the TV to each video's frame rate; Kodi pauses 2 seconds while the TV switches.
 
-Press **Menu** on the remote (**C** on a keyboard) to open the Silo player menu. It shows playback info and live stats, and lets you change the version, speed, aspect, sleep timer, audio track and subtitles, or jump to a chapter. Audio delay and subtitle style open Kodi's own settings. Kodi passes keys to add-ons only through keymaps, so Founders Theater adds one small keymap file that is active only in fullscreen video; turn off **Silo player menu on the Menu key** in its settings to remove it.
+Press **Menu** on the remote (**C** on a keyboard) to open the Silo player menu. It shows playback info and live stats, and lets you change the version, quality (for converted streams), speed, aspect, sleep timer, audio track and subtitles, search for subtitles online, translate them with AI or sync them to the audio (when your server offers it), or jump to a chapter. Audio delay and subtitle style open Kodi's own settings. Kodi passes keys to add-ons only through keymaps, so Founders Theater adds one small keymap file that is active only in fullscreen video; turn off **Silo player menu on the Menu key** in its settings to remove it.
 
-When your Silo server has intro, recap or credits markers for a file, a **Skip** button appears while that part plays. Turn on auto-skip under **Settings** in the profile menu to skip without asking. Near the end of an episode, **Up next** shows the following episode and plays it after a 10-second countdown; turn off **Play next episode automatically** to wait for your choice instead.
+When your Silo server has intro, recap or credits markers for a file, a **Skip** button appears while that part plays. Turn on auto-skip under **Settings → Playback** in the profile menu to skip without asking. Near the end of an episode, **Up next** shows the following episode and plays it after a 10-second countdown; turn off **Play next episode automatically** to wait for your choice instead.
 
-The first time Silo reaches your library it asks **What can this TV show?** and sets the display capability from your answer. Until a device is described, Silo declares SDR with a 1080p ceiling, so HDR and 4K titles are refused with a message that names the setting to change. You can change the answer later under **Settings → Playback → HDR and Dolby Vision capability** and **Maximum video resolution**. Select HDR10 or Dolby Vision only for a compatible device and display. Select **Dolby Vision P7 FEL** only when your hardware, firmware and Kodi build support full enhancement-layer decoding.
+The first time Founders Theater reaches your library it asks **What can this TV show?** and sets the display capability from your answer. Until a device is described, it declares SDR with a 1080p ceiling, so the server converts HDR and 4K titles for this device instead of sending the original file. You can change the answer later under **Settings → This device → More device settings… → Playback → HDR and Dolby Vision capability** and **Maximum video resolution**. Select HDR10 or Dolby Vision only for a compatible device and display. Select **Dolby Vision P7 FEL** only when your hardware, firmware and Kodi build support full enhancement-layer decoding.
 
 Silo chooses the audio track and subtitle for each title; Kodi switches to them itself, so a non-default audio track still plays the original file. If Kodi's decoder stops advancing during playback while the stream keeps arriving, Silo nudges playback a few seconds forward to restart it, at most three times in a row. Subtitle files are downloaded by the add-on and given to Kodi as local files, so your sign-in never appears in Kodi's log.
 
