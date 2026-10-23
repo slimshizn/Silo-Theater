@@ -312,7 +312,7 @@ class Application:
             return
         if self.dialog.yesno("Match frame rate",
                              "Switch the TV to each video's frame rate, so films play without judder?\n\n"
-                             "You can change this later in Silo Settings → This device."):
+                             "You can change this later in Settings → This device."):
             if kodi_settings.set_value(kodi_settings.FRAME_RATE, 2) and not kodi_settings.get(
                     kodi_settings.FRAME_RATE_PAUSE):
                 kodi_settings.set_value(kodi_settings.FRAME_RATE_PAUSE, 20)
