@@ -563,7 +563,19 @@ class TrackTabTests(MenuTestCase):
         self.click_row(window, "English · AC3 · 5.1")
         self.assertEqual(KODI.player.actions(), [("setAudioStream", 0)])
         self.assertTrue(self.menu.is_open())
-        self.assertEqual(self.menu.take_result(), [])
+        # The pick is passed on to be remembered for this title or show.
+        self.assertEqual(self.menu.take_result(), [{"action": "audio_choice", "language": "English · AC3 · 5.1",
+                                                    "title": "English · AC3 · 5.1"}])
+
+    def test_audio_picks_carry_kodis_stream_language(self):
+        KODI.rpc["Player.GetProperties"] = {"currentaudiostream": {"index": 0}, "currentsubtitle": {},
+                                            "subtitleenabled": False,
+                                            "audiostreams": [{"index": 0, "language": "eng", "name": "Main"},
+                                                             {"index": 1, "language": "jpn", "name": ""}]}
+        window = self.open(tab="audio")
+        self.click_row(window, "Commentary")
+        self.assertEqual(self.menu.take_result(), [{"action": "audio_choice", "language": "jpn",
+                                                    "title": "Commentary"}])
 
     def test_audio_settings_intent(self):
         window = self.open(tab="audio")
@@ -610,7 +622,8 @@ class TrackTabTests(MenuTestCase):
 
 class ConvertedMenuRowTests(MenuTestCase):
     QUALITIES = [{"value": "original", "label": "Original"}, {"value": "1080p-medium", "label": "1080p Medium"}]
-    TRACKS = [{"index": 0, "label": "ENG · TRUEHD · 7.1"}, {"index": 1, "label": "Commentary · AAC · Stereo"}]
+    TRACKS = [{"index": 0, "label": "ENG · TRUEHD · 7.1", "language": "eng"},
+              {"index": 1, "label": "Commentary · AAC · Stereo", "language": "eng", "title": "Commentary"}]
 
     def test_quality_row_shows_the_current_choice_and_queues_a_replan(self):
         window = self.open(tab="video", qualities=self.QUALITIES, quality="auto")
@@ -643,7 +656,8 @@ class ConvertedMenuRowTests(MenuTestCase):
         self.click_row(window, "Commentary · AAC · Stereo")  # already playing
         self.assertEqual(self.menu.take_result(), [])
         self.click_row(window, "ENG · TRUEHD · 7.1")
-        self.assertEqual(self.menu.take_result(), [{"action": "audio_track", "index": 0}])
+        self.assertEqual(self.menu.take_result(), [{"action": "audio_choice", "language": "eng", "title": ""},
+                                                   {"action": "audio_track", "index": 0}])
         self.assertNotIn(("setAudioStream", 0), KODI.player.actions())
         self.assertFalse(self.menu.is_open())
 
@@ -656,7 +670,8 @@ class ConvertedMenuRowTests(MenuTestCase):
         window = self.open(tab="audio", converted=False, audio_tracks=self.TRACKS, audio_index=0)
         self.click_row(window, "Commentary")
         self.assertIn(("setAudioStream", 1), KODI.player.actions())
-        self.assertEqual(self.menu.take_result(), [])
+        self.assertEqual(self.menu.take_result(), [{"action": "audio_choice", "language": "Commentary",
+                                                    "title": "Commentary"}])
 
     def test_subtitle_tools_queue_intents_and_close(self):
         window = self.open(tab="subtitles", subtitle_tools=True, ai_translate=True, subtitle_sync=True)

@@ -25,6 +25,17 @@ _ISO = {
     "urd": "ur", "mal": "ml", "kan": "kn", "mar": "mr", "afr": "af", "alb": "sq", "sqi": "sq", "arm": "hy",
     "hye": "hy", "geo": "ka", "kat": "ka", "mac": "mk", "mkd": "mk", "bos": "bs", "kaz": "kk", "uzb": "uz",
 }
+# English language names, as Kodi reports some streams, for the same languages.
+_NAMES = {
+    "english": "en", "spanish": "es", "french": "fr", "german": "de", "dutch": "nl", "italian": "it",
+    "portuguese": "pt", "japanese": "ja", "korean": "ko", "chinese": "zh", "mandarin": "zh", "cantonese": "zh",
+    "russian": "ru", "arabic": "ar", "hindi": "hi", "turkish": "tr", "polish": "pl", "swedish": "sv",
+    "norwegian": "no", "danish": "da", "finnish": "fi", "greek": "el", "hebrew": "he", "czech": "cs",
+    "hungarian": "hu", "thai": "th", "vietnamese": "vi", "indonesian": "id", "ukrainian": "uk",
+    "romanian": "ro", "bulgarian": "bg", "croatian": "hr", "serbian": "sr", "slovak": "sk", "slovenian": "sl",
+    "persian": "fa", "malay": "ms", "filipino": "tl", "tagalog": "tl", "catalan": "ca", "tamil": "ta",
+    "telugu": "te", "bengali": "bn", "urdu": "ur", "malayalam": "ml",
+}
 BITMAP = ("pgs", "hdmv_pgs_subtitle", "vobsub", "dvd_subtitle", "dvb_subtitle", "dvbsub", "sup", "sub", "idx")
 
 
@@ -33,7 +44,8 @@ def language(value):
     text = str(value or "").strip().lower().replace("_", "-").split("-")[0]
     if not text or text in ("und", "unknown", "zxx", "mul"):
         return ""
-    return _ISO.get(text, text)
+    name = text.split(" (")[0].split(" ")[0]
+    return _ISO.get(text) or _NAMES.get(name) or text
 
 
 def _is_hi(track):
@@ -119,23 +131,53 @@ def track_at(version, ordinal):
     return next((track for track in subtitle_tracks(version) if track["index"] == ordinal), None)
 
 
+def _audio_tracks(version):
+    return [track for track in (version or {}).get("audio_tracks") or [] if isinstance(track, dict)]
+
+
+def is_commentary(track):
+    return "comment" in str((track or {}).get("title") or "").lower()
+
+
+def _audio_rank(tracks, ordinal):
+    """Main mix before commentary, the file's default, then more channels."""
+    track = tracks[ordinal]
+    channels = track.get("channels") if isinstance(track.get("channels"), int) else 0
+    return (is_commentary(track), not track.get("default"), -channels, ordinal)
+
+
+def match_audio(version, choice):
+    """Apply a remembered audio choice ({language, commentary}) to a file: an ordinal, or None."""
+    if not isinstance(choice, dict) or not choice.get("language"):
+        return None
+    tracks = _audio_tracks(version)
+    matches = [ordinal for ordinal, track in enumerate(tracks) if language(track.get("language")) == choice["language"]]
+    if not matches:
+        return None
+    commentary = bool(choice.get("commentary"))
+    return min(matches, key=lambda ordinal: (is_commentary(tracks[ordinal]) != commentary,) + _audio_rank(tracks, ordinal))
+
+
 def audio_default(version, profile):
     """(audio ordinal, its language) for the profile's language, then English; main mix before commentary."""
-    tracks = [track for track in (version or {}).get("audio_tracks") or [] if isinstance(track, dict)]
+    tracks = _audio_tracks(version)
     if not tracks:
         return None, ""
     preferred = language((profile or {}).get("language"))
 
     def rank(ordinal):
-        track = tracks[ordinal]
-        channels = track.get("channels") if isinstance(track.get("channels"), int) else 0
-        return ("comment" in str(track.get("title") or "").lower(), not track.get("default"), -channels, ordinal)
+        return _audio_rank(tracks, ordinal)
     for wanted in [code for code in (preferred, "en") if code]:
         matches = [ordinal for ordinal, track in enumerate(tracks) if language(track.get("language")) == wanted]
         if matches:
             return min(matches, key=rank), wanted
     best = min(range(len(tracks)), key=rank)
     return best, language(tracks[best].get("language"))
+
+
+def audio_choice_key(item):
+    """Audio picks are kept beside subtitle picks, per show or per title."""
+    return "audio:" + choice_key(item)
 
 
 def choice_key(item):

@@ -354,6 +354,13 @@ class PlayerMenuWindow(xbmcgui.WindowXMLDialog):
         streams = player_call("getAvailableAudioStreams", default=None)
         return [_text(name) for name in streams] if isinstance(streams, (list, tuple)) else []
 
+    def audio_languages(self):
+        """{stream index: (language, title)} for the file's audio streams, as Kodi reports them."""
+        ok, result = jsonrpc("Player.GetProperties", {"playerid": VIDEO_PLAYER_ID, "properties": ["audiostreams"]})
+        streams = result.get("audiostreams") if ok and isinstance(result, dict) else None
+        return {stream["index"]: (_text(stream.get("language")), _text(stream.get("name")))
+                for stream in streams or [] if isinstance(stream, dict) and isinstance(stream.get("index"), int)}
+
     def subtitle_streams(self):
         streams = player_call("getAvailableSubtitleStreams", default=None)
         return [_text(name) for name in streams] if isinstance(streams, (list, tuple)) else []
@@ -526,11 +533,15 @@ class PlayerMenuWindow(xbmcgui.WindowXMLDialog):
             # Another track needs a new stream from the server (track_change).
             rows = [{"key": "audio_track", "index": track["index"],
                      "label": _text(track.get("label")) or "Track {}".format(track["index"] + 1),
+                     "language": _text(track.get("language")), "title": _text(track.get("title")),
                      "checked": track["index"] == self.context.get("audio_index")} for track in converted]
             rows.append({"key": "native", "window": "osdaudiosettings", "label": "Audio settings (delay, passthrough)…"})
             return rows
         current = self.stream_state()["audio"]
+        languages = self.audio_languages()
         rows = [{"key": "audio", "index": index, "label": name or "Track {}".format(index + 1),
+                 "language": languages.get(index, ("", ""))[0] or name,
+                 "title": languages.get(index, ("", ""))[1] or name,
                  "checked": index == current} for index, name in enumerate(self.audio_streams())]
         rows.append({"key": "native", "window": "osdaudiosettings", "label": "Audio settings (delay, passthrough)…"})
         return rows
@@ -643,6 +654,8 @@ class PlayerMenuWindow(xbmcgui.WindowXMLDialog):
         key = row["key"]
         if key == "audio":
             player_call("setAudioStream", row["index"])
+            # Remember the language for this title or show, like a subtitle pick.
+            self.menu.queue({"action": "audio_choice", "language": row.get("language"), "title": row.get("title")})
             self.redraw()
         elif key == "subtitle":
             if row["index"] < 0:
@@ -659,6 +672,7 @@ class PlayerMenuWindow(xbmcgui.WindowXMLDialog):
             self.dismiss()
         elif key == "audio_track":
             if row["index"] != self.context.get("audio_index"):
+                self.menu.queue({"action": "audio_choice", "language": row.get("language"), "title": row.get("title")})
                 self.menu.queue({"action": "audio_track", "index": row["index"]})
                 self.dismiss()
         elif key == "native":

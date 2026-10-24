@@ -197,6 +197,15 @@ class ExtrasTests(unittest.TestCase):
         extras.tick(101, now=1)
         extras.remember_subtitle.assert_called_once_with({"off": False, "language": "spa"})
 
+    def test_player_menu_audio_picks_are_passed_on_to_be_remembered(self):
+        extras = self.extras()
+        extras.remember_audio = MagicMock()
+        self.home[MENU_REQUEST] = "1"
+        extras.tick(100, now=0)
+        self.menu.intents = [{"action": "audio_choice", "language": "jpn", "title": ""}]
+        extras.tick(101, now=1)
+        extras.remember_audio.assert_called_once_with({"language": "jpn", "title": ""})
+
     def test_version_intent_stops_with_source_position(self):
         extras = self.extras()
         self.home[MENU_REQUEST] = "1"

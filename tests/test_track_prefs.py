@@ -87,6 +87,20 @@ class AudioTests(unittest.TestCase):
         self.assertEqual(track_prefs.audio_default({}, profile()), (None, ""))
 
 
+class RememberedAudioTests(unittest.TestCase):
+    def test_audio_choice_finds_the_language_and_kind_in_any_file(self):
+        self.assertEqual(track_prefs.match_audio(VERSION, {"language": "ja", "commentary": False}), 0)
+        self.assertEqual(track_prefs.match_audio(VERSION, {"language": "en", "commentary": False}), 2)
+        self.assertEqual(track_prefs.match_audio(VERSION, {"language": "en", "commentary": True}), 1)
+        self.assertIsNone(track_prefs.match_audio(VERSION, {"language": "fr"}))
+        self.assertIsNone(track_prefs.match_audio(VERSION, None))
+
+    def test_kodi_language_names_compare_with_codes(self):
+        self.assertEqual(track_prefs.language("Japanese"), "ja")
+        self.assertEqual(track_prefs.language("English (United States)"), "en")
+        self.assertEqual(track_prefs.language("jpn"), "ja")
+
+
 class ApplicationTrackTests(unittest.TestCase):
     def setUp(self):
         self.app = Application.__new__(Application)
@@ -119,6 +133,36 @@ class ApplicationTrackTests(unittest.TestCase):
         self.assertEqual(self.app.subtitle_default(self.episode, VERSION), (0, "remembered"))
         self.app.remember_subtitle_language(self.episode, {"off": True})
         self.assertEqual(self.app.subtitle_default(self.episode, VERSION), (None, "remembered"))
+
+    def test_a_dub_or_original_audio_pick_is_remembered_for_the_show(self):
+        self.app.remember_audio_language(self.episode, VERSION, {"language": "jpn", "title": ""})
+        next_episode = dict(self.episode, content_id="episode:2")
+        self.assertEqual(self.app.audio_default(next_episode, VERSION), (0, "ja"))
+        # Japanese audio, so Auto now shows full English subtitles.
+        self.assertEqual(self.app.subtitle_default(next_episode, VERSION), (1, "auto"))
+        options = self.app._track_options({}, next_episode, VERSION, application_module.AUTO)
+        self.assertEqual((options["audio_track_index"], options["subtitle_track_index"]), (0, 1))
+
+    def test_picking_the_profiles_language_again_forgets_the_audio_pick(self):
+        self.app.remember_audio_language(self.episode, VERSION, {"language": "Japanese"})
+        self.app.remember_audio_language(self.episode, VERSION, {"language": "English"})
+        self.assertEqual(self.app.audio_default(self.episode, VERSION), (2, "en"))
+        self.assertNotIn("audio:series:series:1", self.app._track_choices().get(self.app._track_scope()) or {})
+
+    def test_a_stream_without_a_language_is_not_remembered(self):
+        self.app.remember_audio_language(self.episode, VERSION, {"language": "Track 2"})
+        self.assertEqual(self.app.audio_default(self.episode, VERSION), (2, "en"))
+        self.assertEqual(self.app._track_choices(), {})
+
+    def test_a_commentary_pick_is_kept_even_in_the_profiles_language(self):
+        self.app.remember_audio_language(self.episode, VERSION, {"language": "eng", "title": "Commentary"})
+        self.assertEqual(self.app.audio_default(self.episode, VERSION), (1, "en"))
+
+    def test_audio_and_subtitle_picks_are_kept_apart(self):
+        self.app.remember_subtitle(self.episode, VERSION, 0)
+        self.app.remember_audio_language(self.episode, VERSION, {"language": "jpn"})
+        self.assertEqual(self.app.subtitle_default(self.episode, VERSION), (0, "remembered"))
+        self.assertEqual(self.app.audio_default(self.episode, VERSION), (0, "ja"))
 
     def test_play_requests_the_resolved_audio_and_subtitle(self):
         item = movie_item(0)

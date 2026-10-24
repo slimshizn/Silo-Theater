@@ -162,7 +162,8 @@ def menu_context(item, version, plan, versions, file_id, options, sleep_minutes,
         # Converted (HLS) streams carry one audio track: the menu lists the
         # file's tracks and a change asks the server for a new stream.
         "converted": plan.get("delivery") in HLS_DELIVERIES,
-        "audio_tracks": [{"index": index, "label": audio_track_label(track, index)}
+        "audio_tracks": [{"index": index, "label": audio_track_label(track, index),
+                          "language": track.get("language"), "title": track.get("title")}
                          for index, track in enumerate((version or {}).get("audio_tracks") or [])],
         "audio_index": ((plan.get("selected_tracks") or {}).get("audio") or {}).get("index"),
         "qualities": quality_options(plan),
@@ -177,7 +178,7 @@ class PlaybackExtras:
     def __init__(self, player, item, version, plan, options, skip_button=None, up_next=None,
                  menu_factory=None, home=None, notify=None, next_lookup=None, image=None,
                  versions=(), file_id=None, save_setting=None, log=None, clock=time.monotonic,
-                 remember_subtitle=None,
+                 remember_subtitle=None, remember_audio=None,
                  streak=None, seek=None, ai_enabled=None):
         self.player = player
         self.item, self.version, self.plan = item, version or {}, plan or {}
@@ -190,6 +191,7 @@ class PlaybackExtras:
         self.versions, self.file_id = list(versions), file_id
         self.save_setting = save_setting or (lambda key, value: None)
         self.remember_subtitle = remember_subtitle
+        self.remember_audio = remember_audio
         self.log = log or (lambda event, position=None: None)
         self.clock = clock
         self.streak = streak if streak is not None else WatchStreak()
@@ -367,6 +369,11 @@ class PlaybackExtras:
             elif action == "subtitle_choice" and callable(self.remember_subtitle):
                 try:
                     self.remember_subtitle({"off": bool(intent.get("off")), "language": intent.get("language")})
+                except Exception:  # Remembering is a convenience; never disturb playback.
+                    pass
+            elif action == "audio_choice" and callable(self.remember_audio):
+                try:
+                    self.remember_audio({"language": intent.get("language"), "title": intent.get("title")})
                 except Exception:  # Remembering is a convenience; never disturb playback.
                     pass
             elif action in ("skip_prompts", "auto_next"):

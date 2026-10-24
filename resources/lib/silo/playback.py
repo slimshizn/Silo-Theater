@@ -193,7 +193,7 @@ def _bandwidth_cap(options):
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.6.1", options=None):
+    def __init__(self, client, mode="auto", version="0.6.2", options=None):
         self.client, self.mode, self.version = client, mode, version
         self.options = dict(options or {})
         # /api/v2 calls this installation_id, but it identifies the SERVER.
@@ -775,6 +775,8 @@ class PlaybackController:
         # Why playback stopped for something else: next episode, version, sleep.
         self.next_action = None
         self.loaded_subtitle = None
+        # Set by the application: remember an audio track picked in the player menu.
+        self.remember_audio = None
         # Builds the loopback relay for media the server serves itself.
         self.relay_factory = None
 
@@ -802,6 +804,7 @@ class PlaybackController:
             menu_factory=lambda: PlayerMenu(path), home=xbmcgui.Window(10000), notify=notify,
             next_lookup=self.next_lookup, image=self.image, versions=available_versions(item),
             file_id=effective, save_setting=self.addon.setSetting, remember_subtitle=self.remember_subtitle,
+            remember_audio=self.remember_audio,
             log=lambda event, position=None: log_event(event, position),
             streak=self.streak, seek=seek, ai_enabled=ai_enabled)
 

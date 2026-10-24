@@ -713,6 +713,7 @@ class Application:
         controller.open_screen = self.open_screen
         # A subtitle picked in the player menu is remembered like one picked on the details screen.
         controller.remember_subtitle = lambda choice: self.remember_subtitle_language(selected_item, choice)
+        controller.remember_audio = lambda choice: self.remember_audio_language(selected_item, selected_version, choice)
         controller.subtitle_ai_enabled = self.subtitle_ai_enabled
         try:
             controller.play(selected_item, start_position=start_position, file_id=file_id, options=options,
@@ -746,13 +747,13 @@ class Application:
         choices = self.store.get("track_choices") or {}
         return choices if isinstance(choices, dict) else {}
 
-    def _remembered(self, item):
-        return (self._track_choices().get(self._track_scope()) or {}).get(track_prefs.choice_key(item))
+    def _remembered(self, item, key=None):
+        return (self._track_choices().get(self._track_scope()) or {}).get(key or track_prefs.choice_key(item))
 
-    def _store_choice(self, item, choice):
+    def _store_choice(self, item, choice, key=None):
         choices = self._track_choices()
         scope = dict(choices.get(self._track_scope()) or {})
-        key = track_prefs.choice_key(item)
+        key = key or track_prefs.choice_key(item)
         if choice is None:
             scope.pop(key, None)
         else:
@@ -766,8 +767,33 @@ class Application:
         except (StorageError, AttributeError):
             pass
 
-    def _auto_subtitle(self, version):
-        _audio, audio_language = track_prefs.audio_default(version, self.profile)
+    def audio_default(self, item, version):
+        """(audio ordinal, its language): the viewer's remembered language, else the profile's."""
+        ordinal = track_prefs.match_audio(version, self._remembered(item, track_prefs.audio_choice_key(item)))
+        if ordinal is None:
+            return track_prefs.audio_default(version, self.profile)
+        return ordinal, track_prefs.language(version["audio_tracks"][ordinal].get("language"))
+
+    def remember_audio_language(self, item, version, choice):
+        """An audio pick from the player menu, kept by language for this title or show.
+
+        Picking the profile's own language again forgets the override.
+        """
+        if not isinstance(choice, dict):
+            return
+        language = track_prefs.language(choice.get("language"))
+        if len(language) != 2:  # Only a real language code can find the track again.
+            return
+        commentary = track_prefs.is_commentary({"title": choice.get("title")})
+        _ordinal, automatic = track_prefs.audio_default(version, self.profile)
+        key = track_prefs.audio_choice_key(item)
+        if language == automatic and not commentary:
+            self._store_choice(item, None, key)
+        else:
+            self._store_choice(item, {"language": language, "commentary": commentary}, key)
+
+    def _auto_subtitle(self, item, version):
+        _audio, audio_language = self.audio_default(item, version)
         return track_prefs.auto_subtitle(version, self.profile, audio_language)
 
     def subtitle_default(self, item, version):
@@ -775,12 +801,12 @@ class Application:
         value = track_prefs.match_choice(version, self._remembered(item))
         source = "remembered"
         if value is None:
-            value, source = self._auto_subtitle(version), "auto"
+            value, source = self._auto_subtitle(item, version), "auto"
         return (None if value in (None, track_prefs.OFF) else value), source
 
     def remember_subtitle(self, item, version, ordinal):
         """Keep the viewer's pick for this title (or show); a pick equal to the automatic one is not kept."""
-        automatic = self._auto_subtitle(version)
+        automatic = self._auto_subtitle(item, version)
         automatic = None if automatic in (None, track_prefs.OFF) else automatic
         if ordinal == automatic:
             self._store_choice(item, None)
@@ -799,9 +825,9 @@ class Application:
                                       "forced": False, "hi": False, "external": False})
 
     def _track_options(self, options, item, version, subtitle_index):
-        """Audio from the profile's language and the subtitle to request (see track_prefs)."""
+        """Audio (remembered, else the profile's language) and the subtitle to request (see track_prefs)."""
         options = dict(options)
-        audio, _language = track_prefs.audio_default(version, self.profile)
+        audio, _language = self.audio_default(item, version)
         if audio is not None:
             options["audio_track_index"] = audio
         if subtitle_index is AUTO:
