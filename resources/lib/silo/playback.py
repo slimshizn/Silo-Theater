@@ -8,6 +8,7 @@ import uuid
 from urllib.parse import quote, urlencode, urljoin, urlsplit
 
 from .api import ApiError
+from . import buffering_quality as bq
 from .capabilities import playback_capabilities
 from .player_extras import STREAK
 from .recovery import forget_session, remember_session, remember_stop
@@ -193,7 +194,7 @@ def _bandwidth_cap(options):
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.6.2", options=None):
+    def __init__(self, client, mode="auto", version="0.7.0", options=None):
         self.client, self.mode, self.version = client, mode, version
         self.options = dict(options or {})
         # /api/v2 calls this installation_id, but it identifies the SERVER.
@@ -216,6 +217,11 @@ class PlaybackSession:
         self.attempted_keys = []
         self.attempt_count = 1
         self.quality_preference = str(self.options.get("quality_preference") or "auto")
+        # Buffering quality (buffering_quality_v1): the server's features gate
+        # the request fields; the kept step-down estimate rides later replans.
+        self.server_features = []
+        self.kept_estimate = bq.KeptEstimate()
+        self.buffering_mode = bq.parse_mode(self.options.get("buffering_quality_mode"))
 
     def _negotiate(self):
         capability = self.client.request("GET", "/playback/capabilities", None)
@@ -230,6 +236,7 @@ class PlaybackSession:
             raise PlaybackError("The server did not provide its playback installation identity.")
         self.installation_id = identity
         self.server_capabilities = capability
+        self.server_features = [str(value) for value in capability.get("features") or []]
         # This diagnostic key cannot be confused with old client-minted ids.
         self.client.store.set("playback_installation_id", identity)
         return [feature for feature in ("subrip_sidecar_v1",) if feature in capability.get("features", [])]
@@ -269,6 +276,7 @@ class PlaybackSession:
         if (isinstance(track, int) and not isinstance(track, bool) and track >= 0
                 and self.options.get("subtitle_mode", "server") != "off"):
             body["subtitle_track_index"] = track
+        self._gate_start(body)
         try:
             decision = self.client.request("POST", "/playback/start", body)
         except ApiError as error:
@@ -278,7 +286,9 @@ class PlaybackSession:
             # Refresh discovery once; do not retry unrelated conflicts or loops.
             body["client_features"] = self._negotiate()
             body["installation_id"] = self.installation_id
+            self._gate_start(body)
             decision = self.client.request("POST", "/playback/start", body)
+        self._merge_features(decision)
         if decision.get("protocol_version") != 3:
             raise PlaybackError("The server did not return playback protocol 3.")
         if decision.get("outcome") != "playable":
@@ -304,6 +314,17 @@ class PlaybackSession:
         self.position = _number(plan["timeline"]["source_start_seconds"], field="timeline.source_start_seconds")
         return plan
 
+    def _gate_start(self, body):
+        learned = bq.learned_limit_for_mode(self.buffering_mode)
+        if learned is not None:
+            body["learned_limit"] = learned
+        bq.gate_start_request(body, self.server_features)
+
+    def _merge_features(self, decision):
+        for value in (decision or {}).get("server_features") or [] if isinstance(decision, dict) else []:
+            if value not in self.server_features:
+                self.server_features.append(str(value))
+
     def _validate(self, plan):
         if plan.get("protocol_version") != 3 or plan.get("delivery") not in SUPPORTED_DELIVERIES:
             raise PlaybackError("This device cannot play the playback route the server chose.")
@@ -325,7 +346,7 @@ class PlaybackSession:
                     and isinstance(plan.get("plan_attempt_key"), str) and plan["plan_attempt_key"])
 
     def replan(self, operation, position=None, quality=None, audio_index=None, classification=None,
-               client=None):
+               client=None, buffering=None):
         """Ask the server for another plan for this session (protocol v3 §6).
 
         ``position`` is a source position. Intent operations (track and
@@ -378,7 +399,16 @@ class PlaybackSession:
             if subtitle.get("mode") not in (None, "off") and subtitle.get("track_id"):
                 tracks["subtitle"] = {"id": str(subtitle["track_id"])}
             body["selected_tracks"] = tracks
+        if buffering is not None:
+            # The buffering-quality controller's own quality_change (replan_fields).
+            body.update(bq.replan_fields(buffering))
+        self.kept_estimate.apply(body, buffering)
+        learned = bq.learned_limit_for_mode(self.buffering_mode)
+        if learned is not None and "learned_limit" not in body:
+            body["learned_limit"] = learned
+        bq.gate_replan_request(body, self.server_features)
         decision = (client or self.client).request("POST", self.path + "/replan", body)
+        self._merge_features(decision)
         if not isinstance(decision, dict) or decision.get("protocol_version") != 3:
             raise PlaybackError("The server did not return playback protocol 3.")
         if decision.get("outcome") != "playable":
@@ -1097,24 +1127,96 @@ class PlaybackController:
                                       classification="player_open_failed", client=self.client)
                 native_only = False
 
-        def switch(operation, target=None, **changes):
+        # Lower quality when playback keeps buffering (buffering_quality.py).
+        adoptions = {}
+        buffering_requests, buffering_prompts = [], []
+        caching_since = {"seek": 0.0, "reload": 0.0, "was": False}
+
+        def post_plan_summary(summary):
+            if bq.PLAN_SUMMARY_FEATURE not in session.server_features or not session.start_body:
+                return
+            ids = adoptions.get(summary.plan_id) or {}
+            body = {"installation_id": session.installation_id, "event_id": str(uuid.uuid4()),
+                    "protocol_version": 3, "playback_attempt_id": session.start_body["playback_attempt_id"],
+                    "event": "plan_summary", "diagnostics": summary.diagnostics()}
+            body.update({key: value for key, value in ids.items() if value})
+            try:
+                self.client.request("POST", "/playback/route-events", body)
+            except (ApiError, OSError):
+                log_event("plan_summary_failed")
+
+        def buffering_notice(key):
+            log_event("buffering_quality_" + key)
+            notify(bq.COPY.get(key, ""))
+
+        def buffering_pill(pill):
+            if pill is None:
+                return
+            if pill.kind == bq.PROMPT:
+                buffering_prompts.append(pill)
+            else:
+                # Kodi has no button overlay here; Quality in the Silo player menu restores it.
+                log_event("buffering_quality_lowered")
+                notify(bq.COPY["undo_caption"])
+
+        buffering = bq.BufferingQualityController(
+            on_replan=buffering_requests.append, on_notice=buffering_notice,
+            on_plan_summary=post_plan_summary, on_pill=buffering_pill,
+            clock=lambda: int(time.monotonic() * 1000))
+        buffering.set_mode(session.buffering_mode)
+
+        def adopt(plan, controller_initiated, switched=True):
+            adoption_id = "{}#{}".format(plan.get("plan_id") or "plan", len(adoptions) + 1)
+            adoptions[adoption_id] = {"session_id": session.session_id, "plan_id": plan.get("plan_id"),
+                                      "plan_attempt_id": session.plan_attempt_id,
+                                      "plan_attempt_key": plan.get("plan_attempt_key")}
+            buffering.on_plan_adopted(bq.plan_from_wire(plan, session.quality_preference, adoption_id),
+                                      controller_initiated=controller_initiated)
+            if switched:  # Kodi refills its buffer after a stream switch; the first plan has the start-up grace.
+                caching_since["reload"] = time.monotonic() + 15
+            if not player.finished:
+                buffering.on_playing()  # Kodi started this plan's first frame (onAVStarted).
+
+        def ask_buffering(pill):
+            """Ask first mode: Lower or Keep, closing by itself like the apps' prompt."""
+            try:
+                lower = xbmcgui.Dialog().yesno(bq.COPY["prompt_title"], "Lower the quality to stop buffering?",
+                                               nolabel=bq.COPY["prompt_keep"], yeslabel=bq.COPY["prompt_lower"],
+                                               autoclose=min(10, int(pill.seconds)) * 1000)
+            except (AttributeError, RuntimeError, TypeError):
+                return
+            if lower:
+                buffering.select_lower()
+            elif buffering.pill is not None:
+                buffering.select_keep()
+
+        def switch(operation, target=None, buffering_replan=None, **changes):
             """Replan this session and move Kodi to the new stream."""
             nonlocal stage, recovery, previous
             position = target if target is not None else source_position()
             reporter.hold()
             try:
                 stage = "replan"
+                if buffering_replan is not None:
+                    changes["quality"] = buffering_replan.quality_preference
                 try:
-                    plan = session.replan(operation, position=position, client=self.client, **changes)
+                    plan = session.replan(operation, position=position, client=self.client,
+                                          buffering=buffering_replan, **changes)
                 except PlaybackError as error:
                     log_event("replan_refused_" + operation)
-                    notify(str(error))
+                    if buffering_replan is not None:
+                        buffering.on_replan_failed()
+                    else:
+                        notify(str(error))
                     return None
                 except (ApiError, OSError) as error:
                     log_event("replan_failed_" + operation, error=error if isinstance(error, ApiError) else None)
+                    if buffering_replan is not None:
+                        buffering.on_replan_failed()
                     if isinstance(error, ApiError) and error.status in (404, 410):
                         raise PlaybackError("The playback session ended. Open the title again.")
-                    notify("Silo could not change playback. Try again.")
+                    if buffering_replan is None:
+                        notify("Silo could not change playback. Try again.")
                     return None
                 log_event("replan_" + operation, position)
                 outcome = open_plan(plan, switching=True)
@@ -1122,7 +1224,12 @@ class PlaybackController:
                     recovery, previous = StallRecovery(), None
                     if extras is not None:
                         extras.update_plan(plan, session.quality_preference)
+                    if operation == "quality_change" and buffering_replan is None:
+                        buffering.on_viewer_quality_change()
+                    adopt(plan, controller_initiated=buffering_replan is not None)
                     stage = "polling"
+                elif buffering_replan is not None:
+                    buffering.on_replan_failed()
                 return outcome
             finally:
                 reporter.release()
@@ -1195,6 +1302,7 @@ class PlaybackController:
             if outcome != "started":
                 return
             stage = "polling"
+            adopt(session.plan, controller_initiated=False, switched=False)
             if not player.finished:
                 extras = self._extras(player, item, session.plan, options, file_id, log_event,
                                       seek=extras_seek, ai_enabled=ai_enabled)
@@ -1247,6 +1355,7 @@ class PlaybackController:
                 if not guard.accept(current):
                     if guard.retry_due() and not player.finished:
                         log_event("resume_seek_retry", current)
+                        caching_since["seek"] = time.monotonic() + 10
                         player.seekTime(guard.target)
                     continue
                 if guard.gave_up and not resume_notice_shown:
@@ -1258,12 +1367,19 @@ class PlaybackController:
                 latest_sample = (_position(current), bool(player.paused), _number(offset, signed=True))
                 reporter.submit(*latest_sample)
                 now = time.monotonic()
+                if previous is not None and not server_anchored(session.plan):
+                    expected = previous[0] + (0.0 if latest_sample[1] else now - previous[1])
+                    if abs(latest_sample[0] - expected) > SEEK_JUMP_SECONDS:
+                        # A viewer seek Kodi made locally: its buffering is not a stall.
+                        buffering.on_seek()
+                        caching_since["seek"] = now + 10
                 if server_anchored(session.plan) and previous is not None:
                     expected = previous[0] + (0.0 if latest_sample[1] else now - previous[1])
                     if abs(latest_sample[0] - expected) > SEEK_JUMP_SECONDS:
                         # Kodi seeked inside a growing playlist; the server has
                         # to re-cut the stream at the new position (§6).
                         log_event("seek_reanchor", latest_sample[0])
+                        buffering.on_seek()
                         previous = None
                         if extras is not None:
                             extras.interaction()
@@ -1283,6 +1399,14 @@ class PlaybackController:
                             stop_local()
                             break
                 caching = has_condition("Player.Caching")
+                if caching and not caching_since["was"]:
+                    cause = (bq.SEEK if now < caching_since["seek"] else
+                             bq.RELOAD if now < caching_since["reload"] else bq.NETWORK)
+                    buffering.on_waiting(cause)
+                elif caching_since["was"] and not caching and not latest_sample[1]:
+                    buffering.on_playing()
+                caching_since["was"] = caching
+                buffering.tick()
                 if recovery.nudges >= recovery.max_nudges:
                     if not recovery.exhausted_reported:
                         recovery.exhausted_reported = True
@@ -1298,6 +1422,7 @@ class PlaybackController:
                         target = None
                     if target is not None:
                         log_event("stall_recovery_seek", current)
+                        caching_since["seek"] = time.monotonic() + 10
                         player.seekTime(target)
                 command = None
                 if extras is not None and not player.finished:
@@ -1325,6 +1450,15 @@ class PlaybackController:
                 elif command and command.get("replan") == "track":
                     if switch("track_change", audio_index=command.get("audio_index")) not in (None, "started"):
                         break
+                if buffering_prompts and not player.finished:
+                    ask_buffering(buffering_prompts.pop())
+                    del buffering_prompts[:]
+                if buffering_requests and not player.finished:
+                    replan = buffering_requests.pop()
+                    del buffering_requests[:]
+                    log_event("buffering_quality_replan")
+                    if switch("quality_change", buffering_replan=replan) not in (None, "started"):
+                        break
                 if pending_reanchor and not player.finished:
                     target = pending_reanchor.pop()
                     del pending_reanchor[:]
@@ -1333,6 +1467,10 @@ class PlaybackController:
                 if revision != player.state_revision:
                     revision = player.state_revision
                     log_event("paused" if player.paused else "resumed", current)
+                    if player.paused:
+                        buffering.on_pause()
+                    elif not caching:
+                        buffering.on_playing()
                     if extras is not None:
                         extras.interaction()
             if player.failed:
@@ -1356,6 +1494,10 @@ class PlaybackController:
             if extras is not None:
                 extras.close()
             stop_local()
+            try:
+                buffering.on_playback_stopped()  # Sends the playing plan's summary.
+            except Exception:  # Diagnostics must never break cleanup.
+                log_event("plan_summary_failed")
             if media_relay is not None:
                 media_relay.close()
             source = session.position

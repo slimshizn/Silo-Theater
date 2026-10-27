@@ -20,6 +20,8 @@ HINT_INDENT, HINT_SPACE = 24, 44
 # Row kinds: profile preferences (TOGGLE, CHOICE) are saved on the server; device
 # settings (DEVICE, DEVICE_CHOICE) with addon.setSetting; ACTION rows run an account action.
 TOGGLE, CHOICE, DEVICE, DEVICE_CHOICE, MORE, ACTION = "toggle", "choice", "device", "device_choice", "more", "action"
+# SERVER rows are server settings (settings API) for this profile on this device.
+SERVER, SERVER_CHOICE = "server", "server_choice"
 # KODI rows show and change one of Kodi's own settings (frame-rate matching) through JSON-RPC.
 KODI = "kodi"
 
@@ -43,6 +45,7 @@ STILL_WATCHING_CHOICES = tuple((value, "Never" if value == 0 else "After {} epis
 NEXT_UP_CHOICES = tuple((value, "{} seconds before the end".format(value)) for value in INTEGER_CHOICES["next_up_lead"])
 BITRATE_CHOICES = tuple((value, "No limit" if value == 0 else "{:g} Mbps".format(value / 1000.0))
                         for value in INTEGER_CHOICES["max_bitrate"])
+BUFFERING_CHOICES = (("always", "Automatically"), ("ask", "Ask first"), ("never", "Never"))
 PROFILE_SELECT_CHOICES = (("auto", "Only when no profile is saved"), ("always", "Every time Silo opens"),
                           ("1h", "After 1 hour away"), ("12h", "After 12 hours away"))
 
@@ -63,8 +66,8 @@ PLAYBACK = ("Playback", (
         hint="Pauses autoplay after this many episodes in a row without a key press."),
     row(DEVICE_CHOICE, "Show Up next", "next_up_lead", NEXT_UP_CHOICES,
         hint="Used when an episode has no credits marker."),
-    row(DEVICE_CHOICE, "Maximum bitrate for converted video", "max_bitrate", BITRATE_CHOICES,
-        hint="Limits video that Silo converts. Original files play as they are."),
+    row(SERVER_CHOICE, "Lower quality when buffering", "playback.buffering_quality_mode", BUFFERING_CHOICES,
+        hint="What Silo does on Automatic quality when playback keeps buffering."),
 ))
 AUDIO_SUBTITLES = ("Audio and subtitles", (
     row(CHOICE, "Audio language", "language", LANGUAGES),
@@ -73,6 +76,10 @@ AUDIO_SUBTITLES = ("Audio and subtitles", (
     row(TOGGLE, "Show forced subtitles", "show_forced_subtitles"),
     row(CHOICE, "Metadata language", "preferred_metadata_language", LANGUAGES,
         hint="Language for titles and descriptions. Default uses each library's language."),
+    row(SERVER, "Theme music", "ui.theme_music_enabled",
+        hint="Plays a title's theme music on its details page, when your server has one. Saved for this device."),
+    row(SERVER, "Loop theme music", "ui.theme_music_loop",
+        hint="Repeats the theme while the details page stays open."),
 ))
 THIS_DEVICE = ("This device", (
     row(DEVICE, "Play next episode automatically", "auto_next"),
@@ -95,12 +102,15 @@ ACCOUNT = ("Account", (
     row(ACTION, "Manage profiles", "manage_profiles", hint="Add, change or delete the profiles on this account."),
     row(ACTION, "Send diagnostics report", "diagnostics",
         hint="Sends this device's versions and Founders Theater settings to the server's administrator."),
+    row(ACTION, "Test connection speed", "speed_test",
+        hint="Measures the connection to your Silo server, which Automatic quality plans with."),
     row(ACTION, "Switch server", "server"),
     row(ACTION, "Sign out", "logout"),
 ))
-PROFILE_KINDS = (TOGGLE, CHOICE)
 PROFILE_FIELDS = frozenset(item["key"] for _title, rows in (PLAYBACK, AUDIO_SUBTITLES) for item in rows
-                           if item["kind"] in PROFILE_KINDS)
+                           if item["kind"] in (TOGGLE, CHOICE))
+# Rows that need a full profile: profile fields and server settings.
+PROFILE_KINDS = (TOGGLE, CHOICE, SERVER, SERVER_CHOICE)
 # Account actions that need a full profile (not a temporary session).
 PROFILE_ACTIONS = frozenset({"manage_profiles"})
 
@@ -215,6 +225,11 @@ class SettingsWindow(xbmcgui.WindowXML):
             return next((label for code, label in item["choices"] if code == value), str(value))
         if kind == KODI:
             return kodi_settings.label(item["choices"], kodi_settings.get(item["key"]))
+        if kind == SERVER:
+            return "On" if self.application.server_setting(item["key"]) is True else "Off"
+        if kind == SERVER_CHOICE:
+            value = self.application.server_setting(item["key"])
+            return next((label for code, label in item["choices"] if code == value), str(value))
         return ""
 
     # ------------------------------------------------------------ layout
@@ -337,6 +352,19 @@ class SettingsWindow(xbmcgui.WindowXML):
             self.choose_device(item)
         elif kind == KODI:
             self.choose_kodi(item)
+        elif kind == SERVER:
+            application = self.application
+            value = application.server_setting(item["key"]) is not True
+            application.guard(lambda: application.set_server_setting(item["key"], value))
+        elif kind == SERVER_CHOICE:
+            values = [code for code, _label in item["choices"]]
+            current = self.application.server_setting(item["key"])
+            preselect = values.index(current) if current in values else -1
+            choice = self.application.dialog.select(item["label"], [label for _code, label in item["choices"]],
+                                                    preselect=preselect)
+            if 0 <= choice < len(values) and choice != preselect:
+                application = self.application
+                application.guard(lambda: application.set_server_setting(item["key"], values[choice]))
         self.render_rows()
 
     def choose_kodi(self, item):
@@ -374,6 +402,9 @@ class SettingsWindow(xbmcgui.WindowXML):
             self.render_rows()
         elif key == "diagnostics":
             application.guard(lambda: send_diagnostics(application))
+        elif key == "speed_test":
+            from .svc_connection import test_connection_speed
+            application.guard(lambda: test_connection_speed(application))
         elif key == "server":
             if dialog.yesno("Switch server", "Connect to another Silo server? You stay signed in to this one."):
                 self.result = "server"

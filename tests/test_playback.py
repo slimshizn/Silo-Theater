@@ -1860,3 +1860,84 @@ class ConvertedControllerTests(KodiHarness):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CachingWindow(set):
+    """Player.Caching between two (patched) monotonic times; other conditions as listed."""
+
+    def __init__(self, start, end, others=()):
+        super().__init__(others)
+        self.start, self.end = start, end
+
+    def __contains__(self, name):
+        if name == "Player.Caching":
+            return self.start <= time.monotonic() < self.end
+        return set.__contains__(self, name)
+
+
+class BufferingQualityTests(KodiHarness):
+    """A long stall on Auto lowers quality through a quality_change replan (buffering_quality_v1)."""
+
+    def tearDown(self):
+        PlaybackController.streak.reset()
+        for name in ("fake_extras", "conditions"):
+            self.__dict__.pop(name, None)
+
+    LADDER = [{"label": "original", "display_name": "Original", "height": 2160, "bitrate_kbps": 25000,
+               "preserves_source": True},
+              {"label": "1080p-medium", "display_name": "1080p Medium", "height": 1080, "bitrate_kbps": 6000,
+               "preserves_source": False},
+              {"label": "720p-medium", "display_name": "720p Medium", "height": 720, "bitrate_kbps": 3000,
+               "preserves_source": False}]
+
+    def decision(self, kbps=6000, **kwargs):
+        decision = hls_decision(qualities=self.LADDER, **kwargs)
+        decision["playback_plan"]["effective_recipe"]["bitrate_kbps"] = kbps
+        return decision
+
+    def stall(self, client, mode="always"):
+        # Kodi caches for 8 s once the 10 s start-up grace is over.
+        self.conditions = CachingWindow(12.0, 20.0)
+        events = steady(1, 120) + [(31, "stop")]
+        return self.run_player(client, events, start=0,
+                               options={"subtitle_mode": "server", "buffering_quality_mode": mode})
+
+    def test_auto_steps_down_from_the_delivered_bitrate(self):
+        client = FakeClient(self.decision())
+        client.replans = [self.decision(kbps=3000, plan_id="plan:transcode-0002", key="v3:transcode0002")]
+        state = self.stall(client)
+        bodies = replans(client)
+        self.assertEqual(len(bodies), 1)
+        body = bodies[0]
+        self.assertEqual((body["operation"], body["quality_preference"], body["bandwidth_estimate_kbps"]),
+                         ("quality_change", "auto", 4200))
+        # The server does not advertise buffering_quality_v1: only the older field goes out.
+        for field in ("bandwidth_estimate_source", "learned_limit", "observed_throughput_kbps"):
+            self.assertNotIn(field, body)
+        self.assertNotIn("buffering_quality_v1", body["client_features"])
+        self.assertIn("Quality lowered to stop buffering", state.notices)
+
+    def test_advertised_feature_sends_the_rebuffer_source(self):
+        client = FakeClient(self.decision())
+        client.capabilities["features"].append("buffering_quality_v1")
+        client.replans = [self.decision(kbps=3000, plan_id="plan:transcode-0002", key="v3:transcode0002")]
+        self.stall(client)
+        body = replans(client)[0]
+        self.assertEqual(body["bandwidth_estimate_source"], "observed_rebuffer")
+        self.assertIn("buffering_quality_v1", body["client_features"])
+        start = next(body for _, path, body in client.calls if path == "/playback/start")
+        self.assertIn("buffering_quality_v1", start["client_features"])
+
+    def test_never_mode_does_not_lower_and_ignores_learned_limits(self):
+        client = FakeClient(self.decision())
+        client.capabilities["features"].append("buffering_quality_v1")
+        self.stall(client, mode="never")
+        self.assertEqual(replans(client), [])
+        start = next(body for _, path, body in client.calls if path == "/playback/start")
+        self.assertEqual(start["learned_limit"], "ignore")
+
+    def test_nothing_lower_to_offer_says_so_instead(self):
+        client = FakeClient(hls_decision())  # Only Original above the 6 Mbps playing rung.
+        state = self.stall(client)
+        self.assertEqual(replans(client), [])
+        self.assertIn("Can't lower quality for this video", state.notices)

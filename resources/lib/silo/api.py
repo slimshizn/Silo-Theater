@@ -104,8 +104,11 @@ class SiloClient:
                  "profile_id", "profile_token", "profile_token_expires_at",
                  "temporary_session", "bound_profile_id", "session_expires_at", "auth_session_id")
 
-    def __init__(self, server_url, store, transport=None, clock=None, user_agent="FoundersTheater"):
+    def __init__(self, server_url, store, transport=None, clock=None, user_agent="FoundersTheater", device_id=None):
         self.server_url = normalize_server_url(server_url)
+        # Stable id of this Kodi installation (X-Silo-Device-Id): device-scoped
+        # settings, playback preferences and learned connection limits.
+        self.device_id = device_id
         self.store = store
         self.transport = transport or UrllibTransport()
         self._clock = clock or time.time
@@ -196,6 +199,8 @@ class SiloClient:
 
     def headers(self, authenticated=True, profile=True):
         headers = {"Accept": "application/json", "User-Agent": self.user_agent}
+        if getattr(self, "device_id", None):
+            headers["X-Silo-Device-Id"] = self.device_id
         if authenticated:
             token = self.current_token()
             if not token:
@@ -367,6 +372,26 @@ class SiloClient:
                 raise ApiError(403, "The playback sign-in or selected profile changed.", "playback_scope_changed")
             self._save_tokens(result)
             return result
+
+    def effective_settings(self, keys):
+        """{key: value} for server settings as they apply to this profile on this device."""
+        data = self.request("GET", "/settings/values/effective", params={"keys": list(keys)})
+        items = data.get("items") if isinstance(data, dict) else None
+        return {entry["key"]: entry.get("value") for entry in items or []
+                if isinstance(entry, dict) and isinstance(entry.get("key"), str)}
+
+    def put_setting(self, key, value, scope="profile_device"):
+        """Store a server setting; profile_device keeps it to this Kodi installation."""
+        return self.request("PUT", "/settings/values/{}".format(quote(str(key), safe="")), {"value": value},
+                            params={"scope": scope})
+
+    def save_track_pref(self, kind, key, body):
+        """Remember a series (or movie) audio/subtitle choice for this profile on every device."""
+        return self.request("PUT", "/{}-prefs/{}".format(kind, quote(str(key), safe="")), body)
+
+    def forget_track_pref(self, kind, key):
+        """Back to automatic: delete the remembered audio/subtitle choice."""
+        return self.request("DELETE", "/{}-prefs/{}".format(kind, quote(str(key), safe="")))
 
     def logout(self):
         try:

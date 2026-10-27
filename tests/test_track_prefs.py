@@ -87,6 +87,65 @@ class AudioTests(unittest.TestCase):
         self.assertEqual(track_prefs.audio_default({}, profile()), (None, ""))
 
 
+class ServerTrackPrefsTests(unittest.TestCase):
+    """Choices live on the server (audio-prefs / subtitle-prefs), as on Android."""
+
+    def setUp(self):
+        self.app = Application.__new__(Application)
+        self.app.addon = MagicMock()
+        self.app.addon.getSetting.return_value = ""
+        self.app.store = Store(profile_id="p")
+        self.app.client = MagicMock(server_url="https://silo.example.invalid")
+        self.app.profile = dict(profile(), id="p")
+        self.episode = {"content_id": "episode:1", "type": "episode", "series_id": "series:1", "versions": [VERSION]}
+
+    def test_audio_pick_is_saved_for_the_series_with_its_signature(self):
+        self.app.remember_audio_language(self.episode, VERSION, {"language": "jpn", "title": ""})
+        kind, key, body = self.app.client.save_track_pref.call_args.args
+        self.assertEqual((kind, key), ("audio", "series:1"))
+        self.assertEqual(body, {"audio_track_index": 0, "audio_language": "jpn",
+                                "track_signature": {"language": "jpn", "channels": 6}})
+        self.assertEqual(self.app._track_choices(), {self.app._track_scope(): {}})
+
+    def test_picking_the_profiles_audio_again_forgets_it_on_the_server(self):
+        self.app.remember_audio_language(self.episode, VERSION, {"language": "English"})
+        self.app.client.forget_track_pref.assert_called_once_with("audio", "series:1")
+        self.app.client.save_track_pref.assert_not_called()
+
+    def test_subtitle_picks_save_track_off_and_auto(self):
+        movie = {"content_id": "movie:1", "type": "movie", "versions": [VERSION]}
+        self.app.remember_subtitle(movie, VERSION, 3)
+        kind, key, body = self.app.client.save_track_pref.call_args.args
+        self.assertEqual((kind, key, body["subtitle_mode"], body["subtitle_track_index"]),
+                         ("subtitle", "movie:1", "always", 3))
+        self.assertEqual(body["track_signature"], {"source": "embedded", "language": "eng", "codec": "subrip",
+                                                   "label": "English SDH", "forced": False, "hearing_impaired": True})
+        self.app.remember_subtitle(movie, VERSION, None)
+        self.assertEqual(self.app.client.save_track_pref.call_args.args[2],
+                         {"subtitle_language": "", "subtitle_track_index": -1, "subtitle_mode": "off"})
+        self.app.remember_subtitle(movie, VERSION, 2)  # The profile's own automatic pick.
+        self.app.client.forget_track_pref.assert_called_once_with("subtitle", "movie:1")
+
+    def test_defaults_follow_what_the_server_resolved(self):
+        version = dict(VERSION, effective_audio_track_index=0)
+        item = dict(self.episode, effective_subtitle_mode="always", effective_subtitle_language="en",
+                    effective_show_forced_subtitles=True,
+                    effective_subtitle_track_signature={"source": "embedded", "language": "eng", "codec": "subrip",
+                                                        "label": "English SDH", "forced": False,
+                                                        "hearing_impaired": True})
+        self.assertEqual(self.app.audio_default(item, version), (0, "ja"))
+        self.assertEqual(self.app.subtitle_default(item, version), (3, "remembered"))
+        off = dict(self.episode, effective_subtitle_mode="off", effective_subtitle_language="")
+        self.assertEqual(self.app.subtitle_default(off, version), (None, "remembered"))
+        plain = dict(self.episode, effective_subtitle_mode="auto", effective_subtitle_language="en")
+        self.assertEqual(self.app.subtitle_default(plain, version), (1, "auto"))
+
+    def test_signature_falls_back_to_the_closest_track_in_its_language(self):
+        signature = {"source": "embedded", "language": "en", "codec": "ass", "forced": True}
+        self.assertEqual(track_prefs.match_subtitle_signature(VERSION, signature), 2)
+        self.assertIsNone(track_prefs.match_subtitle_signature(VERSION, {"language": "fr"}))
+
+
 class RememberedAudioTests(unittest.TestCase):
     def test_audio_choice_finds_the_language_and_kind_in_any_file(self):
         self.assertEqual(track_prefs.match_audio(VERSION, {"language": "ja", "commentary": False}), 0)
@@ -109,6 +168,10 @@ class ApplicationTrackTests(unittest.TestCase):
         self.app.dialog = MagicMock()
         self.app.store = Store(profile_id="p")
         self.app.client = MagicMock(server_url="https://silo.example.invalid")
+        # These tests cover the on-device fallback: the server refuses saved choices.
+        refused = application_module.ApiError(404, "Not found", "not_found")
+        self.app.client.save_track_pref.side_effect = refused
+        self.app.client.forget_track_pref.side_effect = refused
         self.app.profile = dict(profile(), id="p")
         self.episode = {"content_id": "episode:1", "type": "episode", "series_id": "series:1", "versions": [VERSION]}
 
@@ -129,9 +192,9 @@ class ApplicationTrackTests(unittest.TestCase):
         self.assertEqual(self.app.subtitle_default(self.episode, VERSION), (1, "auto"))
 
     def test_player_menu_picks_are_remembered_by_language(self):
-        self.app.remember_subtitle_language(self.episode, {"off": False, "language": "spa"})
+        self.app.remember_subtitle_language(self.episode, VERSION, {"off": False, "language": "spa"})
         self.assertEqual(self.app.subtitle_default(self.episode, VERSION), (0, "remembered"))
-        self.app.remember_subtitle_language(self.episode, {"off": True})
+        self.app.remember_subtitle_language(self.episode, VERSION, {"off": True})
         self.assertEqual(self.app.subtitle_default(self.episode, VERSION), (None, "remembered"))
 
     def test_a_dub_or_original_audio_pick_is_remembered_for_the_show(self):

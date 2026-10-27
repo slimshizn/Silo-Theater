@@ -38,6 +38,8 @@ class Application:
         self.profile_avatar = ""
         self.server_name = ""
         self._libraries = None
+        self._server_settings = None
+        self._theme = None
 
     def run(self, argv=None):
         """Start the add-on; ``play <id>`` / ``open <id>`` arguments deep-link
@@ -65,9 +67,57 @@ class Application:
         finally:
             if home is not None:
                 home.clearProperty("silo.running")
+            if getattr(self, "_theme", None) is not None:
+                self._theme.close()
 
     def _profile_dir(self):
         return xbmcvfs.translatePath(self.addon.getAddonInfo("profile"))
+
+    def device_id(self):
+        """A stable id for this Kodi installation, created on first use."""
+        import uuid
+        from .storage import SessionStore
+
+        folder = str(self._profile_dir())
+        if not os.path.isabs(folder):
+            return None
+        try:
+            store = SessionStore(os.path.join(folder, "device.json"))
+            value = store.get("device_id")
+            if not isinstance(value, str) or not value:
+                value = "kodi-" + uuid.uuid4().hex
+                store.set("device_id", value)
+            return value
+        except (StorageError, OSError, AttributeError):
+            return None
+
+    # Server settings this add-on shows, with the server manifest's defaults.
+    SERVER_SETTINGS = {"ui.theme_music_enabled": False, "ui.theme_music_loop": False,
+                       "playback.buffering_quality_mode": "always"}
+
+    def server_setting(self, key):
+        """A server setting as it applies to this profile on this device (cached per profile)."""
+        if getattr(self, "_server_settings", None) is None:
+            try:
+                self._server_settings = self.client.effective_settings(self.SERVER_SETTINGS)
+            except (ApiError, OSError, AttributeError):
+                # Defaults for this profile until it changes; never one request per screen row.
+                self._server_settings = {}
+        value = self._server_settings.get(key)
+        return self.SERVER_SETTINGS.get(key) if value is None else value
+
+    def set_server_setting(self, key, value):
+        """Save a server setting for this profile on this device (see api.put_setting)."""
+        self.client.put_setting(key, value)
+        if getattr(self, "_server_settings", None) is not None:
+            self._server_settings[key] = value
+
+    def theme(self):
+        """The add-on's single theme music player (theme_music.py)."""
+        if getattr(self, "_theme", None) is None:
+            from .theme_music import ThemeMusic
+            self._theme = ThemeMusic(self.client, self.server_setting, monitor=self.monitor)
+        return self._theme
 
     def _session_path(self, server_url):
         """Each server keeps its own sign-in, so switching servers keeps both."""
@@ -241,7 +291,12 @@ class Application:
     def _connect(self, server_url):
         version = "".join(char for char in str(self.addon.getAddonInfo("version")) if char in "0123456789.")[:24]
         self.client = SiloClient(server_url, self.store,
-                                 user_agent="FoundersTheater/" + version if version else "FoundersTheater")
+                                 user_agent="FoundersTheater/" + version if version else "FoundersTheater",
+                                 device_id=self.device_id())
+        self._server_settings = None
+        if getattr(self, "_theme", None) is not None:
+            self._theme.close()
+        self._theme = None
         self.server_name = urlsplit(self.client.server_url).hostname or "Silo"
 
     # The default display setting declares SDR and 1080p, so the server converts
@@ -519,6 +574,10 @@ class Application:
         self.profile_name = str(profile["name"])
         self.profile_avatar = avatar_image(profile.get("avatar_url"))
         self._libraries = None  # Library access differs per profile.
+        self._server_settings = None  # So do server settings and theme access.
+        if getattr(self, "_theme", None) is not None:
+            self._theme.close()
+        self._theme = None
         self._requests_enabled = None
         return True
 
@@ -598,7 +657,12 @@ class Application:
             children = children.get("items", [])
         window = DetailsWindow("SiloDetails.xml", self.addon.getAddonInfo("path"), "Default", "1080i")
         window.application, window.item, window.children = self, item, children
-        window.doModal()
+        theme = self.theme()
+        theme.push(item)
+        try:
+            window.doModal()
+        finally:
+            theme.pop()
         del window
 
     def options(self):
@@ -669,7 +733,8 @@ class Application:
             return None
         self._after_playback_item = None
         options = dict(self.options(), auto_skip=self.auto_skip(),
-                       quality_preference=(self.profile or {}).get("quality_preference") or "auto")
+                       quality_preference=(self.profile or {}).get("quality_preference") or "auto",
+                       buffering_quality_mode=self.server_setting("playback.buffering_quality_mode"))
         if not auto_next:
             # Shuffle and extras pick what plays next themselves.
             options["auto_next"] = False
@@ -712,14 +777,20 @@ class Application:
         controller.next_lookup, controller.image = self.next_episode, self.image
         controller.open_screen = self.open_screen
         # A subtitle picked in the player menu is remembered like one picked on the details screen.
-        controller.remember_subtitle = lambda choice: self.remember_subtitle_language(selected_item, choice)
+        controller.remember_subtitle = lambda choice: self.remember_subtitle_language(
+            selected_item, selected_version, choice)
         controller.remember_audio = lambda choice: self.remember_audio_language(selected_item, selected_version, choice)
         controller.subtitle_ai_enabled = self.subtitle_ai_enabled
+        theme = getattr(self, "_theme", None)
+        if theme is not None:
+            theme.suspend()
         try:
             controller.play(selected_item, start_position=start_position, file_id=file_id, options=options,
                             exact_start=start_at is not None)
         finally:
             self._cache_playback_item(selected_item, file_id, getattr(controller, "last_result", None))
+            if theme is not None:
+                theme.resume()
         try:
             from .widgets import clear_cache
 
@@ -767,62 +838,123 @@ class Application:
         except (StorageError, AttributeError):
             pass
 
+    def _save_server_choice(self, kind, item, body):
+        """Save (body) or forget (None) a choice on the server; False when it cannot.
+
+        Silo applies the saved choice on every device and reports it back in
+        the item's effective_* fields. The local store is only the fallback.
+        """
+        key = track_prefs.pref_key(item)
+        client = self.client
+        if not key or client is None or not hasattr(client, "save_track_pref"):
+            return False
+        try:
+            if body is None:
+                client.forget_track_pref(kind, key)
+            else:
+                client.save_track_pref(kind, key, body)
+        except ApiError:
+            return False
+        return True
+
     def audio_default(self, item, version):
-        """(audio ordinal, its language): the viewer's remembered language, else the profile's."""
+        """(audio ordinal, its language): what the server will play, else the local rules."""
+        tracks = (version or {}).get("audio_tracks") or []
+        effective = (version or {}).get("effective_audio_track_index")
+        if (isinstance(effective, int) and not isinstance(effective, bool) and 0 <= effective < len(tracks)
+                and isinstance(tracks[effective], dict)):
+            return effective, track_prefs.language(tracks[effective].get("language"))
         ordinal = track_prefs.match_audio(version, self._remembered(item, track_prefs.audio_choice_key(item)))
         if ordinal is None:
             return track_prefs.audio_default(version, self.profile)
         return ordinal, track_prefs.language(version["audio_tracks"][ordinal].get("language"))
 
-    def remember_audio_language(self, item, version, choice):
-        """An audio pick from the player menu, kept by language for this title or show.
+    def remember_audio(self, item, version, ordinal):
+        """Keep an audio pick for this show (or movie) on the server; the profile's own pick resets it."""
+        automatic, _language = track_prefs.audio_default(version, self.profile)
+        body = None if ordinal == automatic else track_prefs.audio_pref_body(version, ordinal)
+        if ordinal != automatic and body is None:
+            return
+        key = track_prefs.audio_choice_key(item)
+        if self._save_server_choice("audio", item, body):
+            self._store_choice(item, None, key)
+            return
+        track = ((version or {}).get("audio_tracks") or [])[ordinal] if body is not None else None
+        self._store_choice(item, None if body is None else {
+            "language": track_prefs.language(track.get("language")),
+            "commentary": track_prefs.is_commentary(track)}, key)
 
-        Picking the profile's own language again forgets the override.
-        """
+    def remember_audio_language(self, item, version, choice):
+        """An audio pick from the player menu, where Kodi reports the stream's language."""
         if not isinstance(choice, dict):
             return
         language = track_prefs.language(choice.get("language"))
         if len(language) != 2:  # Only a real language code can find the track again.
             return
         commentary = track_prefs.is_commentary({"title": choice.get("title")})
-        _ordinal, automatic = track_prefs.audio_default(version, self.profile)
-        key = track_prefs.audio_choice_key(item)
-        if language == automatic and not commentary:
-            self._store_choice(item, None, key)
-        else:
-            self._store_choice(item, {"language": language, "commentary": commentary}, key)
+        ordinal = track_prefs.match_audio(version, {"language": language, "commentary": commentary})
+        if ordinal is not None:
+            self.remember_audio(item, version, ordinal)
 
-    def _auto_subtitle(self, item, version):
+    def _profile_subtitle(self, item, version):
+        """The profile's automatic subtitle, ignoring any choice saved for the series."""
         _audio, audio_language = self.audio_default(item, version)
-        return track_prefs.auto_subtitle(version, self.profile, audio_language)
+        automatic = track_prefs.auto_subtitle(version, self.profile, audio_language)
+        return None if automatic in (None, track_prefs.OFF) else automatic
 
     def subtitle_default(self, item, version):
         """(ordinal or None for Off, "remembered" | "auto"): what plays unless the viewer picks."""
-        value = track_prefs.match_choice(version, self._remembered(item))
-        source = "remembered"
-        if value is None:
-            value, source = self._auto_subtitle(item, version), "auto"
+        _audio, audio_language = self.audio_default(item, version)
+        server = track_prefs.server_subtitle_prefs(item)
+        if server is not None:
+            value = track_prefs.match_subtitle_signature(version, item.get("effective_subtitle_track_signature"))
+            source = "remembered"
+            if value is None or server["subtitle_mode"] == "off":
+                value = track_prefs.auto_subtitle(version, server, audio_language)
+                # Shown as (Auto) unless a series choice changed the profile's mode or language.
+                profile = self.profile or {}
+                source = "auto" if (
+                    str(server["subtitle_mode"]).lower() == str(profile.get("subtitle_mode") or "auto").lower()
+                    and track_prefs.language(server["subtitle_language"])
+                    == track_prefs.language(profile.get("subtitle_language"))) else "remembered"
+        else:
+            value = track_prefs.match_choice(version, self._remembered(item))
+            source = "remembered"
+            if value is None:
+                value, source = track_prefs.auto_subtitle(version, self.profile, audio_language), "auto"
         return (None if value in (None, track_prefs.OFF) else value), source
 
     def remember_subtitle(self, item, version, ordinal):
-        """Keep the viewer's pick for this title (or show); a pick equal to the automatic one is not kept."""
-        automatic = self._auto_subtitle(item, version)
-        automatic = None if automatic in (None, track_prefs.OFF) else automatic
-        if ordinal == automatic:
+        """Keep a subtitle pick for this show (or movie); the profile's own pick resets it to automatic."""
+        if ordinal == self._profile_subtitle(item, version):
+            body = None
+        else:
+            body = track_prefs.subtitle_pref_body(version, ordinal)
+            if body is None:
+                return
+        if self._save_server_choice("subtitle", item, body):
             self._store_choice(item, None)
             return
-        self._store_choice(item, track_prefs.remembered_choice(
+        self._store_choice(item, None if body is None else track_prefs.remembered_choice(
             track_prefs.track_at(version, ordinal) if ordinal is not None else None))
 
-    def remember_subtitle_language(self, item, choice):
+    def remember_subtitle_language(self, item, version, choice):
         """A pick from the player menu, where Kodi only reports the stream language."""
         if not isinstance(choice, dict):
             return
         if choice.get("off"):
-            self._store_choice(item, {"kind": "off"})
-        elif track_prefs.language(choice.get("language")):
-            self._store_choice(item, {"kind": "track", "language": track_prefs.language(choice["language"]),
-                                      "forced": False, "hi": False, "external": False})
+            self.remember_subtitle(item, version, None)
+            return
+        language = track_prefs.language(choice.get("language"))
+        if not language:
+            return
+        ordinal = track_prefs.match_choice(version, {"kind": "track", "language": language, "forced": False,
+                                                     "hi": False, "external": False})
+        if ordinal is not None and ordinal != track_prefs.OFF:
+            self.remember_subtitle(item, version, ordinal)
+        else:
+            self._store_choice(item, {"kind": "track", "language": language, "forced": False, "hi": False,
+                                      "external": False})
 
     def _track_options(self, options, item, version, subtitle_index):
         """Audio (remembered, else the profile's language) and the subtitle to request (see track_prefs)."""

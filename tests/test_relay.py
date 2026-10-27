@@ -98,7 +98,8 @@ class RelayTests(unittest.TestCase):
     def test_kodi_gets_a_loopback_url_and_the_server_gets_the_sign_in(self):
         local = self.relay.register(self.base + "/api/v2/stream/s1?st=signed", {"X-Route": "r"})
         self.assertTrue(local.startswith("http://127.0.0.1:{}/".format(self.relay.port)))
-        self.assertTrue(local.endswith("/s1?st=signed"))
+        self.assertTrue(local.endswith("/s1"))
+        self.assertNotIn("signed", local)  # Kodi logs the URL it plays; the token stays in the relay.
         self.assertNotIn("old", local)
         status, headers, data = self.fetch(local)
         self.assertEqual((status, data), (200, BODY))
@@ -129,6 +130,20 @@ class RelayTests(unittest.TestCase):
         with self.assertRaises(HTTPError) as caught:
             self.fetch(local)
         self.assertEqual((caught.exception.code, self.client.refreshes), (401, 1))
+
+    def test_an_unauthenticated_route_sends_no_sign_in(self):
+        local = self.relay.register(self.base + "/api/v2/stream/s1?st=signed", authenticated=False)
+        with self.assertRaises(HTTPError) as caught:
+            self.fetch(local)
+        self.assertEqual(caught.exception.code, 401)  # This fake server wants a sign-in it never got.
+        self.assertNotIn("Authorization", self.upstream.seen[-1][1])
+        self.assertEqual(self.client.refreshes, 0)
+
+    def test_a_segment_with_its_own_query_keeps_it(self):
+        local = self.relay.register(self.base + "/api/v2/playback/transcode/s1/master.m3u8?st=a")
+        self.assertTrue(local.endswith("/master.m3u8"))
+        self.fetch(local)
+        self.assertEqual(self.upstream.seen[-1][0], "/silo/api/v2/playback/transcode/s1/master.m3u8?st=a")
 
     def test_hls_segments_resolve_relative_to_the_playlist(self):
         local = self.relay.register(self.base + "/api/v2/playback/transcode/s1/master.m3u8?st=a")

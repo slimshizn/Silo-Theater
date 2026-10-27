@@ -55,6 +55,26 @@ class ClientTests(unittest.TestCase):
     def client(self, transport, store=None):
         return SiloClient(BASE, store if store is not None else credentials(), transport, clock=lambda: 100)
 
+    def test_device_id_rides_every_request_and_settings_use_the_settings_api(self):
+        transport = Transport(response({"items": [{"key": "ui.theme_music_enabled", "value": True},
+                                                  {"key": "playback.buffering_quality_mode", "value": "ask"}]}),
+                              response(None, 204), response(None, 204), response(None, 204))
+        client = SiloClient(BASE, credentials(), transport, clock=lambda: 100, device_id="kodi-abc")
+        values = client.effective_settings(["ui.theme_music_enabled", "playback.buffering_quality_mode"])
+        self.assertEqual(values, {"ui.theme_music_enabled": True, "playback.buffering_quality_mode": "ask"})
+        method, url, headers, _body = transport.calls[0]
+        self.assertEqual(headers["X-Silo-Device-Id"], "kodi-abc")
+        self.assertIn("keys=ui.theme_music_enabled&keys=playback.buffering_quality_mode", url)
+        client.put_setting("ui.theme_music_loop", True)
+        method, url, _headers, body = transport.calls[1]
+        self.assertEqual((method, url, body), ("PUT", BASE + "/api/v2/settings/values/ui.theme_music_loop"
+                                               "?scope=profile_device", {"value": True}))
+        client.save_track_pref("audio", "series:1", {"audio_track_index": 0})
+        client.forget_track_pref("subtitle", "movie:1")
+        self.assertEqual([(m, u) for m, u, _h, _b in transport.calls[2:]],
+                         [("PUT", BASE + "/api/v2/audio-prefs/series%3A1"),
+                          ("DELETE", BASE + "/api/v2/subtitle-prefs/movie%3A1")])
+
     def test_reverse_proxy_prefix_and_encoded_catalog_id(self):
         transport = Transport(response({"content_id": "movie:a/b"}))
         self.client(transport).item("movie:a/b")

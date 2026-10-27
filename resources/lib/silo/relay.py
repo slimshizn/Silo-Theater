@@ -56,10 +56,10 @@ class _Handler(BaseHTTPRequestHandler):
         if target is None:
             self.send_error(404)
             return
-        url, extra = target
+        url, extra, authenticated = target
         try:
             response = relay.open(method, url, extra, {key: self.headers[key] for key in FORWARD_REQUEST
-                                                       if self.headers.get(key)})
+                                                       if self.headers.get(key)}, authenticated)
         except (ApiError, URLError, OSError):
             self.send_error(502)
             return
@@ -104,14 +104,21 @@ class MediaRelay:
     def port(self):
         return self._server.server_address[1]
 
-    def register(self, url, headers=None):
-        """A loopback URL for ``url``; its directory stays reachable (HLS segments)."""
+    def register(self, url, headers=None, authenticated=True):
+        """A loopback URL for ``url``; its directory stays reachable (HLS segments).
+
+        ``authenticated`` adds this sign-in's headers; turn it off for a URL on
+        another origin that carries its own credential (a proxy node).
+        """
         parts = urlsplit(url)
         directory, _, name = parts.path.rpartition("/")
         route = secrets.token_urlsafe(18)
         with self._lock:
-            self._routes[route] = ("{}://{}{}/".format(parts.scheme, parts.netloc, directory), dict(headers or {}))
-        return "http://127.0.0.1:{}/{}/{}{}".format(self.port, route, name, "?" + parts.query if parts.query else "")
+            # The entry file's query (a signed stream or theme token) stays here:
+            # Kodi logs and shows the URL it plays.
+            self._routes[route] = ("{}://{}{}/".format(parts.scheme, parts.netloc, directory), dict(headers or {}),
+                                   authenticated, name, parts.query)
+        return "http://127.0.0.1:{}/{}/{}".format(self.port, route, name)
 
     def resolve(self, path):
         """(upstream URL, extra headers) for a relay path, or None."""
@@ -123,24 +130,27 @@ class MediaRelay:
         if (target is None or not rest or "\\" in rest or "%2f" in lowered or "%2e" in lowered or "%5c" in lowered
                 or any(segment in ("", ".", "..") for segment in rest.split("/"))):
             return None
-        base, extra = target
-        return base + rest + ("?" + parts.query if parts.query else ""), extra
+        base, extra, authenticated, entry, entry_query = target
+        query = parts.query or (entry_query if rest == entry else "")
+        return base + rest + ("?" + query if query else ""), extra, authenticated
 
-    def open(self, method, url, extra, forwarded):
+    def open(self, method, url, extra, forwarded, authenticated=True):
         """Open ``url`` with fresh sign-in headers; one renewal on 401.
 
         Returns the upstream response (an HTTPError is one too), so the
         player sees the server's real status.
         """
         for attempt in (0, 1):
-            headers = self.client.headers()
+            headers = self.client.headers() if authenticated else {
+                "User-Agent": getattr(self.client, "user_agent", "FoundersTheater")}
             headers["Accept"] = "*/*"
             headers.update(extra)
             headers.update(forwarded)
             try:
                 return self.opener.open(Request(url, headers=headers, method=method), timeout=UPSTREAM_TIMEOUT)
             except HTTPError as error:
-                if error.code == 401 and attempt == 0 and self.client.store.get("refresh_token"):
+                if (authenticated and error.code == 401 and attempt == 0
+                        and self.client.store.get("refresh_token")):
                     error.close()
                     self.client.refresh_if_current(headers)
                     continue

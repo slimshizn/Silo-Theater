@@ -114,6 +114,11 @@ def make_application(profile=None, fail=False, addon=None):
         application.profile = dict(application.profile, **changes)
         return application.profile
 
+    server = {"ui.theme_music_enabled": False, "ui.theme_music_loop": False,
+              "playback.buffering_quality_mode": "always"}
+    application.server_values = server
+    application.server_setting.side_effect = server.get
+    application.set_server_setting.side_effect = server.__setitem__
     application.guard.side_effect = guard
     application.update_profile.side_effect = update_profile
     return application
@@ -163,12 +168,12 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(labels, ["Skip intros automatically", "Skip credits automatically",
                                   "Skip recaps automatically", "Quality preference", "Rewind when resuming",
                                   "Ask if you're still watching", "Show Up next",
-                                  "Maximum bitrate for converted video"])
+                                  "Lower quality when buffering"])
         self.assertEqual([value_label(window, index) for index in range(8)],
                          ["Off", "On", "Off", "Automatic", "7 seconds", "After 3 episodes",
-                          "30 seconds before the end", "No limit"])
+                          "30 seconds before the end", "Automatically"])
         select_category(window, ACCOUNT)
-        for index in range(4, ui_settings.SLOTS):
+        for index in range(5, ui_settings.SLOTS):
             window.getControl(ui_settings.slot_ids(index)[0]).setVisible.assert_called_with(False)
 
     def test_moving_on_the_rail_swaps_the_rows(self):
@@ -208,9 +213,9 @@ class LayoutTests(unittest.TestCase):
                          ["Playback", "This device", "Account"])
         window.getControl(ui_settings.RAIL_BUTTONS[3]).setVisible.assert_called_with(False)
         self.assertEqual([item["key"] for item in window.rows()],
-                         ["resume_rewind", "still_watching", "next_up_lead", "max_bitrate"])
+                         ["resume_rewind", "still_watching", "next_up_lead"])
         select_category(window, 2)
-        self.assertEqual([item["key"] for item in window.rows()], ["diagnostics", "server", "logout"])
+        self.assertEqual([item["key"] for item in window.rows()], ["diagnostics", "speed_test", "server", "logout"])
 
     def test_every_category_shows_its_rows_when_focused_or_clicked(self):
         window = open_window()
@@ -356,12 +361,34 @@ class DeviceSettingTests(unittest.TestCase):
         self.assertEqual(window.result, "device")
 
 
+class ServerSettingTests(unittest.TestCase):
+    """Theme music and buffering quality are server settings for this profile on this device."""
+
+    def test_theme_music_toggles_through_the_settings_api(self):
+        application = make_application()
+        window = open_window(application)
+        select_category(window, 1)
+        index = click(window, "ui.theme_music_enabled")
+        self.assertIs(application.server_values["ui.theme_music_enabled"], True)
+        self.assertEqual(value_label(window, index), "On")
+        application.update_profile.assert_not_called()
+
+    def test_buffering_choice_preselects_the_server_value(self):
+        application = make_application()
+        application.dialog.select.return_value = 1
+        window = open_window(application)
+        index = click(window, "playback.buffering_quality_mode")
+        self.assertEqual(application.dialog.select.call_args[0][1], ["Automatically", "Ask first", "Never"])
+        self.assertEqual(application.dialog.select.call_args[1]["preselect"], 0)
+        self.assertEqual(application.server_values["playback.buffering_quality_mode"], "ask")
+        self.assertEqual(value_label(window, index), "Ask first")
+
+
 class NewDeviceSettingTests(unittest.TestCase):
     def test_device_choices_write_the_integer_and_choice_values(self):
         cases = ((PLAYBACK, "resume_rewind", 0, "0", "Off"),
                  (PLAYBACK, "still_watching", 3, "4", "After 4 episodes"),
                  (PLAYBACK, "next_up_lead", 3, "60", "60 seconds before the end"),
-                 (PLAYBACK, "max_bitrate", 2, "8000", "8 Mbps"),
                  (DEVICE, "profile_select", 3, "12h", "After 12 hours away"))
         for category, key, choice, stored, label in cases:
             with self.subTest(key=key):
@@ -376,15 +403,16 @@ class NewDeviceSettingTests(unittest.TestCase):
                 application.update_profile.assert_not_called()
 
     def test_device_choice_preselects_the_stored_value_and_ignores_cancel(self):
-        addon = FakeAddon({"max_bitrate": "20000"})
+        addon = FakeAddon({"resume_rewind": "10"})
         application = make_application(addon=addon)
         window = open_window(application)
-        index = click(window, "max_bitrate")
+        index = click(window, "resume_rewind")
         options = application.dialog.select.call_args[0][1]
-        self.assertEqual(options, ["No limit", "4 Mbps", "8 Mbps", "12 Mbps", "20 Mbps", "40 Mbps"])
+        self.assertEqual(options, ["Off", "3 seconds", "5 seconds", "7 seconds", "10 seconds", "15 seconds",
+                                   "30 seconds"])
         self.assertEqual(application.dialog.select.call_args[1]["preselect"], 4)
-        self.assertEqual(addon.values, {"max_bitrate": "20000"})
-        self.assertEqual(value_label(window, index), "20 Mbps")
+        self.assertEqual(addon.values, {"resume_rewind": "10"})
+        self.assertEqual(value_label(window, index), "10 seconds")
 
     def test_bitrate_choices_match_the_settings_module(self):
         from resources.lib.silo.settings import INTEGER_CHOICES

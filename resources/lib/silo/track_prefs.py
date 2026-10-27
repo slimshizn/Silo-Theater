@@ -62,6 +62,8 @@ def subtitle_tracks(version):
         codec = str(track.get("codec") or track.get("format") or "").lower()
         external = bool(track.get("external"))
         result.append({"index": ordinal, "language": language(track.get("language")),
+                       "raw_language": str(track.get("language") or "").strip(),
+                       "codec": codec, "label": str(track.get("title") or "").strip(),
                        "forced": bool(track.get("forced")), "hi": _is_hi(track), "external": external,
                        # Embedded bitmap subtitles can be shown by the player; external ones need burning in.
                        "burn": codec in BITMAP and external})
@@ -178,6 +180,100 @@ def audio_default(version, profile):
 def audio_choice_key(item):
     """Audio picks are kept beside subtitle picks, per show or per title."""
     return "audio:" + choice_key(item)
+
+
+def pref_key(item):
+    """The server's key for a remembered track choice: the series, or the movie itself."""
+    return str(item.get("series_id") or item.get("content_id") or "") if item.get("type") in (
+        "episode", "movie") else ""
+
+
+def server_subtitle_prefs(item):
+    """The subtitle preferences the server resolved for this item, as a profile-like dict, or None.
+
+    The detail's effective_subtitle_* fields already include a choice saved
+    for the series on any device, so they replace the profile's own values.
+    """
+    if not isinstance(item, dict) or "effective_subtitle_mode" not in item:
+        return None
+    return {"subtitle_mode": item.get("effective_subtitle_mode") or "auto",
+            "subtitle_language": item.get("effective_subtitle_language") or "",
+            "show_forced_subtitles": item.get("effective_show_forced_subtitles") is not False}
+
+
+def _norm(value):
+    return str(value or "").strip().lower()
+
+
+def subtitle_signature(track):
+    """A subtitle_tracks() entry as the server's SubtitleTrackSignature (Android parity)."""
+    signature = {"source": "external" if track["external"] else "embedded", "forced": track["forced"],
+                 "hearing_impaired": track["hi"]}
+    for key, value in (("language", track["raw_language"]), ("codec", track["codec"]), ("label", track["label"])):
+        if value:
+            signature[key] = value
+    return signature
+
+
+def match_subtitle_signature(version, signature):
+    """The ordinal of the track a stored signature describes, or None.
+
+    Exact match first (source, language, codec, label when stored, forced,
+    SDH); otherwise the closest track in the same language.
+    """
+    if not isinstance(signature, dict):
+        return None
+    wanted = language(signature.get("language"))
+    candidates = [track for track in subtitle_tracks(version) if track["language"] == wanted]
+    source = _norm(signature.get("source"))
+    for track in candidates:
+        if (source == ("external" if track["external"] else "embedded")
+                and _norm(signature.get("codec")) == _norm(track["codec"])
+                and (not _norm(signature.get("label")) or _norm(signature.get("label")) == _norm(track["label"]))
+                and bool(signature.get("forced")) == track["forced"]
+                and bool(signature.get("hearing_impaired")) == track["hi"]):
+            return track["index"]
+
+    def score(track):
+        return ((4 if source == ("external" if track["external"] else "embedded") else 0)
+                + (2 if bool(signature.get("forced")) == track["forced"] else 0)
+                + (2 if bool(signature.get("hearing_impaired")) == track["hi"] else 0)
+                + (1 if _norm(signature.get("codec")) == _norm(track["codec"]) else 0)
+                + (1 if _norm(signature.get("label")) == _norm(track["label"]) else 0))
+    return max(candidates, key=lambda track: (score(track), -track["index"]))["index"] if candidates else None
+
+
+def subtitle_pref_body(version, ordinal):
+    """PUT /subtitle-prefs body: a track (mode always) or Off (index -1)."""
+    if ordinal is None:
+        return {"subtitle_language": "", "subtitle_track_index": -1, "subtitle_mode": "off"}
+    track = track_at(version, ordinal)
+    if track is None:
+        return None
+    return {"subtitle_language": "" if track["language"] in ("", "und") else track["raw_language"],
+            "subtitle_track_index": ordinal, "subtitle_mode": "always",
+            "track_signature": subtitle_signature(track)}
+
+
+def audio_pref_body(version, ordinal):
+    """PUT /audio-prefs body for the track at ``ordinal`` (Android SeriesAudioChoice parity)."""
+    tracks = _audio_tracks(version)
+    if not isinstance(ordinal, int) or isinstance(ordinal, bool) or not 0 <= ordinal < len(tracks):
+        return None
+    track = tracks[ordinal]
+    body = {"audio_track_index": ordinal}
+    if language(track.get("language")):
+        body["audio_language"] = str(track["language"]).strip()
+    signature = {}
+    for key in ("language", "title", "embedded_title", "codec", "layout"):
+        value = str(track.get(key) or "").strip()
+        if value:
+            signature[key] = value
+    if isinstance(track.get("channels"), int) and not isinstance(track.get("channels"), bool) and track["channels"] > 0:
+        signature["channels"] = track["channels"]
+    if signature:
+        body["track_signature"] = signature
+    return body
 
 
 def choice_key(item):
