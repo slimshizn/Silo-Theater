@@ -1103,6 +1103,15 @@ class SkinTests(unittest.TestCase):
             self.assertIn("Control.HasFocus({})".format(button_id), visible)
         self.assertEqual(names, ["Home", "Movies", "Series", "For You", "Calendar", "Requests"])
 
+    def test_hero_synopsis_scrolls_through_long_text_by_itself(self):
+        boxes = [node for node in self.tree.iter("control") if node.get("type") == "textbox"
+                 and node.findtext("label") == "$INFO[Window.Property(silo.hero.synopsis)]"]
+        self.assertEqual(len(boxes), 1)
+        scroll = boxes[0].find("autoscroll")
+        self.assertIsNotNone(scroll)
+        self.assertEqual((scroll.text, scroll.get("delay"), scroll.get("time"), scroll.get("repeat")),
+                         ("true", "4000", "2000", "10000"))
+
     def test_every_top_bar_shows_the_clock_top_right(self):
         for name in ("SiloHome.xml", "SiloBrowseRows.xml", "SiloBrowseGrid.xml", "SiloPerson.xml",
                      "SiloRequests.xml"):

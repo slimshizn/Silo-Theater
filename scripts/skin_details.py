@@ -369,8 +369,11 @@ def hero():
     ] + badges + [
         "      " + label(100, 294, 1080, 36, "$INFO[{}]".format(prop("silo.meta")), "font12", "E0EDEDED",
                          "<aligny>center</aligny>", 1230),
+        # Long synopses scroll through by themselves; Read more opens the whole text.
         '      <control type="textbox" id="1240"><left>100</left><top>346</top><width>1080</width><height>114</height>'
-        '<font>font27</font><textcolor>D9EDEDED</textcolor><label>$INFO[{}]</label>{}</control>'.format(
+        '<font>font27</font><textcolor>D9EDEDED</textcolor>'
+        '<autoscroll delay="2000" time="2000" repeat="10000">true</autoscroll>'
+        '<label>$INFO[{}]</label>{}</control>'.format(
             prop("silo.plot"), visible(has("silo.plot"))),
         # Read more: the full synopsis when it runs past the box (ui_details.READ_MORE).
         '      <control type="button" id="112"><left>1200</left><top>408</top><width>240</width><height>52</height>'

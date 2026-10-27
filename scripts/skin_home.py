@@ -253,8 +253,10 @@ def home():
               condition="String.IsEmpty({})".format(logo), kind="textbox"),
     ] + badges + [
         label(88, 346, 880, 36, "$INFO[Window.Property(silo.hero.meta)]", "font12", SECONDARY, control_id=430),
+        # Long synopses scroll through by themselves after a pause on the card; the hero is not focusable.
         '<control type="textbox">' + rect(88, 396, 780, 84) + "<font>font27</font><textcolor>" + MUTED
-        + "</textcolor><label>$INFO[Window.Property(silo.hero.synopsis)]</label></control>",
+        + '</textcolor><autoscroll delay="4000" time="2000" repeat="10000">true</autoscroll>'
+        + "<label>$INFO[Window.Property(silo.hero.synopsis)]</label></control>",
     ])
     return group(300, 0, 0, 1920, 1080, [
         image(691, 0, 1229, 756, "$INFO[Window.Property(silo.hero.backdrop)]", diffuse="mask_hero.png",

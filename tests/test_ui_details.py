@@ -893,6 +893,12 @@ class DetailsSkinTests(unittest.TestCase):
             sys.path.pop(0)
         self.assertEqual(SKIN.read_text(encoding="utf-8"), generator.build())
 
+    def test_synopsis_scrolls_through_long_text_by_itself(self):
+        scroll = self.controls[1240].find("autoscroll")
+        self.assertIsNotNone(scroll)
+        self.assertEqual((scroll.text, scroll.get("delay"), scroll.get("time"), scroll.get("repeat")),
+                         ("true", "2000", "2000", "10000"))
+
     def test_capsule_text_never_scrolls_inside_its_button(self):
         # A Kodi button pads its label by textoffsetx on both sides, which left "Play" 22 px.
         for control_id, prop in ((ui_details.PLAY, "silo.play_label"), (ui_details.NEXT_UP, "silo.continue_label")):

@@ -158,6 +158,7 @@
           <height>84</height>
           <font>font27</font>
           <textcolor>B3EDEDED</textcolor>
+          <autoscroll delay="4000" time="2000" repeat="10000">true</autoscroll>
           <label>$INFO[Window.Property(silo.hero.synopsis)]</label>
         </control>
       </control>
