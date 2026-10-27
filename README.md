@@ -48,11 +48,11 @@ make build
 make repository
 ```
 
-`make build` creates `dist/script.silo-0.7.4.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
+`make build` creates `dist/script.silo-0.7.5.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
-Version **0.7.4** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** under **Settings → This device → More device settings…** to limit converted streams. On Automatic quality, **Lower quality when buffering** (Settings → Playback) asks your server for a lower quality when playback keeps buffering, as the Silo apps do; choose Ask first or Never to change that. **Settings → Account → Test connection speed** measures your connection to Silo and can clear a limit Silo learned after buffering.
+Version **0.7.5** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** under **Settings → This device → More device settings…** to limit converted streams. On Automatic quality, **Lower quality when buffering** (Settings → Playback) asks your server for a lower quality when playback keeps buffering, as the Silo apps do; choose Ask first or Never to change that. **Settings → Account → Test connection speed** measures your connection to Silo and can clear a limit Silo learned after buffering.
 
 ### Theme music
 

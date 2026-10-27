@@ -203,7 +203,8 @@ def top_bar():
                     aspect="scale", background=True),
               image(-4, -4, 64, 64, "ring_circle.png", color=TEXT, condition="Control.HasFocus(230)")]
     return group(200, 0, 56, 1920, 64, [
-        label(88, 0, 520, 64, "Founders Theater", "font36_title", TEXT),
+        image(88, 12, 40, 40, "brand_icon.png", aspect="keep"),
+        label(142, 0, 466, 64, "[COLOR FFE8CF8F]FOUNDERS[/COLOR] THEATER", "font25_title", "FFFFFFFF"),
         group(202, 404, 0, 1200, 64, search + tabs),
         group(None, 1776, 4, 56, 56, avatar),
     ], animation=dim)

@@ -809,7 +809,9 @@ class SkinTests(unittest.TestCase):
             tree = ET.parse(SKIN / name)
             labels = [node.findtext("label") for node in tree.iter("control")]
             self.assertIn(DISCLAIMER, labels, name)
-            self.assertIn("Founders Theater", labels, name)
+            # The install page's lockup: the add-on icon, FOUNDERS in gold and THEATER in white.
+            self.assertIn("[COLOR FFE8CF8F]FOUNDERS[/COLOR] THEATER", labels, name)
+            self.assertIn("brand_icon.png", [node.findtext("texture") for node in tree.iter("control")], name)
             # Only the add-on's name, never the Silo wordmark (it must not look official).
             self.assertNotIn("silo_wordmark.png", (SKIN / name).read_text(encoding="utf-8"), name)
 

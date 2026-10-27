@@ -288,16 +288,24 @@
       <top>56</top>
       <width>1920</width>
       <height>64</height>
-      <control type="label">
+      <control type="image">
         <left>88</left>
+        <top>12</top>
+        <width>40</width>
+        <height>40</height>
+        <aspectratio>keep</aspectratio>
+        <texture>brand_icon.png</texture>
+      </control>
+      <control type="label">
+        <left>142</left>
         <top>0</top>
-        <width>520</width>
+        <width>466</width>
         <height>64</height>
-        <font>font36_title</font>
-        <textcolor>FFEDEDED</textcolor>
+        <font>font25_title</font>
+        <textcolor>FFFFFFFF</textcolor>
         <align>left</align>
         <aligny>center</aligny>
-        <label>Founders Theater</label>
+        <label>[COLOR FFE8CF8F]FOUNDERS[/COLOR] THEATER</label>
       </control>
       <control type="image" id="102">
         <left>860</left>

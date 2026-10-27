@@ -183,7 +183,8 @@ def hub():
               aspect="scale", fade=400, background=True),
         image(0, 0, 1920, 240, "scrim_top.png", color=BLACK),
         group(None, 0, 56, 1920, 64, [
-            label(88, 0, 400, 64, "Founders Theater", "font36_title", TEXT),
+            image(88, 12, 40, 40, "brand_icon.png", aspect="keep"),
+            label(142, 0, 346, 64, "[COLOR FFE8CF8F]FOUNDERS[/COLOR] THEATER", "font25_title", "FFFFFFFF"),
             label(480, 0, 400, 64, "Requests", "font36_title", MUTED),
         ]),
     ] + search + [preview] + [row_slot(index) for index in range(SLOTS)] + [
