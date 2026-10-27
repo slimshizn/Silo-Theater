@@ -28,6 +28,7 @@ class BuildTests(unittest.TestCase):
         self.version = self.manifest.get("version")
         shutil.copytree(ROOT / "resources", self.root / "resources")
         (self.root / "default.py").write_text("print('Silo')\n", encoding="utf-8")
+        (self.root / "service.py").write_text("print('Silo service')\n", encoding="utf-8")
 
     def write(self, name, content="private data"):
         path = self.root / name
@@ -84,6 +85,13 @@ class BuildTests(unittest.TestCase):
     def test_missing_entry_point_is_reported_before_packaging(self):
         (self.root / "default.py").unlink()
         with self.assertRaisesRegex(ValueError, "default.py"):
+            build.build_addon(self.root)
+
+    def test_startup_service_is_packaged_and_required_when_declared(self):
+        with zipfile.ZipFile(build.build_addon(self.root)) as archive:
+            self.assertIn("script.silo/service.py", archive.namelist())
+        (self.root / "service.py").unlink()
+        with self.assertRaisesRegex(ValueError, "service.py"):
             build.build_addon(self.root)
 
     def test_python_and_xml_errors_are_reported_before_packaging(self):

@@ -164,7 +164,7 @@ class WidgetsAddonTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder) / "source"
             shutil.copytree(ROOT / "resources", root / "resources")
-            for name in ("default.py", "LICENSE"):
+            for name in ("default.py", "service.py", "LICENSE"):
                 shutil.copyfile(ROOT / name, root / name)
             manifest = (ROOT / "addon.xml").read_text(encoding="utf-8").replace(
                 "</addon>", '  <extension point="xbmc.python.pluginsource" library="default.py">'

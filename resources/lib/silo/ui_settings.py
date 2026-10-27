@@ -98,7 +98,8 @@ THIS_DEVICE = ("This device", (
         hint="When Silo shows the profile picker on this device."),
     row(DEVICE, "Hide spoilers", "hide_spoilers",
         hint="Hides descriptions and images of episodes you have not watched."),
-    row(MORE, "More device settings…", hint="Display, HDR and Dolby Vision, resume and browsing."),
+    row(MORE, "More device settings…",
+        hint="Display, HDR and Dolby Vision, resume, browsing and opening when Kodi starts."),
 ))
 ACCOUNT = ("Account", (
     row(ACTION, "Manage profiles", "manage_profiles", hint="Add, change or delete the profiles on this account."),

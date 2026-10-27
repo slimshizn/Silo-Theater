@@ -29,10 +29,14 @@ DEFAULTS = {
     "still_watching": 3,
     "next_up_lead": 30,
     "max_bitrate": 0,
+    # Opening Founders Theater when Kodi starts (startup.py).
+    "open_on_start": False,
+    "open_on_any_screen": True,
+    "open_delay": 0,
 }
 
 BOOLEANS = ("show_plot", "auto_next", "skip_prompts", "player_menu_key", "hide_spoilers", "stop_on_back",
-            "online_tv_themes")
+            "online_tv_themes", "open_on_start", "open_on_any_screen")
 
 CHOICES = {
     "sign_in_method": ("code", "password"),
@@ -52,6 +56,7 @@ INTEGER_CHOICES = {
     "still_watching": (0, 2, 3, 4, 5),  # auto-played episodes before asking; 0 never asks
     "next_up_lead": (15, 30, 45, 60),  # seconds before the end when a file has no credits marker
     "max_bitrate": (0, 4000, 8000, 12000, 20000, 40000),  # kbps for converted streams; 0 = no limit
+    "open_delay": (0, 5, 10, 20, 30),  # seconds to wait after Kodi starts before opening
 }
 
 

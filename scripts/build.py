@@ -18,7 +18,7 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ROOT_FILES = frozenset({"addon.xml", "default.py", "LICENSE"})
+ROOT_FILES = frozenset({"addon.xml", "default.py", "service.py", "LICENSE"})
 REQUIRED_ROOT_FILES = ("addon.xml", "default.py", "LICENSE")
 RESOURCE_SUFFIXES = frozenset(
     {".py", ".xml", ".po", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ttf", ".otf"}
@@ -106,6 +106,10 @@ def validate_addon(root: Path) -> Dict[str, str]:
     scripts = manifest.findall("./extension[@point='xbmc.python.script']")
     if len(scripts) != 1 or scripts[0].get("library") != "default.py":
         raise ValueError("The script entry point must be default.py")
+    for service in manifest.findall("./extension[@point='xbmc.service']"):
+        # The only service opens the add-on when Kodi starts (resources/lib/silo/startup.py).
+        if service.get("library") != "service.py" or not (root / "service.py").is_file():
+            raise ValueError("The service entry point must be service.py")
     if manifest.findall("./extension[@point='xbmc.python.pluginsource']"):
         # A second role makes Kodi list the add-on twice; widgets ship in
         # their own add-on (widgets/) instead.

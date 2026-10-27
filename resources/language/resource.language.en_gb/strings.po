@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 msgid ""
 msgstr ""
-"Project-Id-Version: script.silo 0.7.6\n"
+"Project-Id-Version: script.silo 0.7.7\n"
 "Language: en_GB\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -383,4 +383,52 @@ msgstr ""
 
 msgctxt "#32104"
 msgid "When your Silo server has no theme for a show, play it from Plex's public TV theme library by the show's TVDB id. Plex sees which show's theme you ask for."
+msgstr ""
+
+msgctxt "#32105"
+msgid "Open Founders Theater when Kodi starts"
+msgstr ""
+
+msgctxt "#32106"
+msgid "Opens Founders Theater automatically after Kodi starts on this device. Takes effect the next time Kodi starts."
+msgstr ""
+
+msgctxt "#32107"
+msgid "Open even if Kodi starts on another screen"
+msgstr ""
+
+msgctxt "#32108"
+msgid "Turn off to open Founders Theater only when Kodi starts on its Home screen."
+msgstr ""
+
+msgctxt "#32109"
+msgid "Startup delay"
+msgstr ""
+
+msgctxt "#32110"
+msgid "How long to wait after Kodi starts before opening Founders Theater, for example while the network connects."
+msgstr ""
+
+msgctxt "#32111"
+msgid "No delay"
+msgstr ""
+
+msgctxt "#32112"
+msgid "5 seconds"
+msgstr ""
+
+msgctxt "#32113"
+msgid "10 seconds"
+msgstr ""
+
+msgctxt "#32114"
+msgid "20 seconds"
+msgstr ""
+
+msgctxt "#32115"
+msgid "30 seconds"
+msgstr ""
+
+msgctxt "#32116"
+msgid "Startup"
 msgstr ""

@@ -19,6 +19,7 @@ Founders Theater is a community project. It is not an official Silo app and is n
 - Up next with a countdown, Are you still watching?, and rewind when resuming.
 - A Silo player menu during playback: info, stats, version, quality, speed, aspect, sleep timer, audio, subtitles (including online search, AI translation and sync to audio) and chapters.
 - Settings for your profile and this device (profile menu → **Settings**); switch between several Silo servers.
+- Optionally opens when Kodi starts, with a startup delay (**Settings → This device → More device settings… → Startup**).
 - Widgets for Kodi's own home screen with the optional **Founders Theater Widgets** add-on: your Silo rows, Watchlist and Favorites.
 
 ## Install in Kodi
@@ -48,11 +49,11 @@ make build
 make repository
 ```
 
-`make build` creates `dist/script.silo-0.7.6.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
+`make build` creates `dist/script.silo-0.7.7.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
-Version **0.7.6** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** under **Settings → This device → More device settings…** to limit converted streams. On Automatic quality, **Lower quality when buffering** (Settings → Playback) asks your server for a lower quality when playback keeps buffering, as the Silo apps do; choose Ask first or Never to change that. **Settings → Account → Test connection speed** measures your connection to Silo and can clear a limit Silo learned after buffering.
+Version **0.7.7** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** under **Settings → This device → More device settings…** to limit converted streams. On Automatic quality, **Lower quality when buffering** (Settings → Playback) asks your server for a lower quality when playback keeps buffering, as the Silo apps do; choose Ask first or Never to change that. **Settings → Account → Test connection speed** measures your connection to Silo and can clear a limit Silo learned after buffering.
 
 ### Theme music
 
