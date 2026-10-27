@@ -80,6 +80,8 @@ AUDIO_SUBTITLES = ("Audio and subtitles", (
         hint="Plays a title's theme music on its details page, when your server has one. Saved for this device."),
     row(SERVER, "Loop theme music", "ui.theme_music_loop",
         hint="Repeats the theme while the details page stays open."),
+    row(DEVICE, "Online TV themes", "online_tv_themes",
+        hint="When your server has no theme for a show, plays it from Plex's public TV theme library."),
 ))
 THIS_DEVICE = ("This device", (
     row(DEVICE, "Play next episode automatically", "auto_next"),
@@ -111,8 +113,9 @@ PROFILE_FIELDS = frozenset(item["key"] for _title, rows in (PLAYBACK, AUDIO_SUBT
                            if item["kind"] in (TOGGLE, CHOICE))
 # Rows that need a full profile: profile fields and server settings.
 PROFILE_KINDS = (TOGGLE, CHOICE, SERVER, SERVER_CHOICE)
-# Account actions that need a full profile (not a temporary session).
-PROFILE_ACTIONS = frozenset({"manage_profiles"})
+# Rows that need a full profile (not a temporary session): an account action, and the
+# online-themes switch, which only matters with Theme music (a profile setting) on.
+PROFILE_ACTIONS = frozenset({"manage_profiles", "online_tv_themes"})
 
 
 def slot_ids(index):

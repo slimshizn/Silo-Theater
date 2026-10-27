@@ -75,7 +75,7 @@ class ThemeMusicTests(unittest.TestCase):
 
     def music(self):
         theme = ThemeMusic(self.client, self.settings.get, player=self.player, relay_factory=FakeRelay)
-        theme._watch = lambda owner, entry: None  # No loop thread in unit tests.
+        theme._watch = lambda *args: None  # No loop thread in unit tests.
         self.addCleanup(theme.close)
         return theme
 
@@ -154,3 +154,84 @@ class ThemeMusicSafetyTests(ThemeMusicTests):
         theme = self.music()
         theme.push(item("movie:1"))
         self.assertTrue(theme.relay.routes[0][1])
+
+
+class OnlineTvThemeTests(unittest.TestCase):
+    """Online TV themes: Plex's public library by TVDB id when the server has none."""
+
+    def setUp(self):
+        self.settings = {"ui.theme_music_enabled": True, "ui.theme_music_loop": False}
+        self.player = FakePlayer()
+        self.client = FakeClient()
+        self.now = 1000000.0
+        self.answers = {}  # url -> True / False / None
+        self.checked = []
+        self.misses = str(Path(self.tmp()) / "theme_misses.json")
+        modules = patch.dict(sys.modules, {"xbmcgui": SimpleNamespace(ListItem=lambda **kwargs: SimpleNamespace(
+            setProperty=lambda *a: None, getMusicInfoTag=lambda: SimpleNamespace(setTitle=lambda t: None)))})
+        modules.start()
+        self.addCleanup(modules.stop)
+
+    def tmp(self):
+        import tempfile
+        folder = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(folder, ignore_errors=True))
+        return folder
+
+    def check(self, url):
+        self.checked.append(url)
+        return self.answers.get(url, True)
+
+    def music(self, online=True):
+        theme = ThemeMusic(self.client, self.settings.get, player=self.player, relay_factory=FakeRelay,
+                           online=lambda: online, misses_path=self.misses, check_online=self.check,
+                           clock=lambda: self.now)
+        theme._watch = lambda *args: None
+        self.addCleanup(theme.close)
+        return theme
+
+    def series(self, tvdb="81189"):
+        return {"content_id": "series-tvdb-" + tvdb, "type": "series", "tvdb_id": tvdb}
+
+    def test_a_show_without_a_server_theme_plays_plexs_theme(self):
+        self.music().push(self.series())
+        self.assertEqual(self.player.played, ["https://tvthemes.plexapp.com/81189.mp3"])
+
+    def test_the_servers_own_theme_wins(self):
+        self.music().push(dict(self.series(), themes={"owner_id": "series-tvdb-81189",
+                                                       "items": [{"id": "t1", "title": "Local"}]}))
+        self.assertEqual(self.player.played, ["http://127.0.0.1:9/relay/1"])
+        self.assertEqual(self.checked, [])
+
+    def test_episode_and_season_pages_use_the_shows_tvdb_id(self):
+        self.music().push({"content_id": "episode:1", "type": "episode", "series_id": "series-tvdb-121361",
+                           "tvdb_id": "999"})
+        self.assertEqual(self.player.played, ["https://tvthemes.plexapp.com/121361.mp3"])
+
+    def test_a_miss_waits_a_week_before_asking_again(self):
+        url = "https://tvthemes.plexapp.com/81189.mp3"
+        self.answers[url] = False
+        self.music().push(self.series())
+        self.now += 6 * 24 * 3600
+        self.music().push(self.series())
+        self.assertEqual(self.checked, [url])  # Not asked again within the week, even after a restart.
+        self.answers[url] = True
+        self.now += 2 * 24 * 3600
+        self.music().push(self.series())
+        self.assertEqual(self.checked, [url, url])
+        self.assertEqual(self.player.played, [url])
+
+    def test_offline_is_not_remembered_as_a_miss(self):
+        url = "https://tvthemes.plexapp.com/81189.mp3"
+        self.answers[url] = None
+        self.music().push(self.series())
+        self.answers[url] = True
+        self.music().push(self.series())
+        self.assertEqual(self.player.played, [url])
+
+    def test_off_movies_and_theme_music_off_never_ask_plex(self):
+        self.music(online=False).push(self.series())
+        self.music().push({"content_id": "movie-tmdb-1", "type": "movie", "tvdb_id": "5"})
+        self.settings["ui.theme_music_enabled"] = False
+        self.music().push(self.series())
+        self.assertEqual((self.checked, self.player.played), ([], []))

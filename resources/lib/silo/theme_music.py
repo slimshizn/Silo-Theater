@@ -9,11 +9,20 @@ closes and pauses while a video plays. It never starts over other audio.
 Theme grants are short-lived signed URLs; Kodi plays them through the loopback
 relay (relay.py), so the URL never reaches Kodi's log. The sign-in is only
 attached when the theme comes from the Silo server itself.
+
+Optionally (device setting "Online TV themes", off by default), a show the
+server has no theme for plays its theme from Plex's public TV theme library
+by TVDB id. A show found missing there is asked about again after a week.
 """
 
+import json
+import os
+import re
 import threading
 import time
+from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urljoin, urlsplit
+from urllib.request import Request, build_opener
 
 from .api import ApiError
 
@@ -25,6 +34,11 @@ ACCEPTED_FORMATS = [{"container": container, "audio_codec": codec} for container
 WATCH_SECONDS = 1.0
 # Kodi's Player.stop() is asynchronous; wait this long for our theme to end.
 STOP_WAIT_SECONDS = 2.0
+ONLINE_THEME_URL = "https://tvthemes.plexapp.com/{}.mp3"
+ONLINE_RECHECK_SECONDS = 7 * 24 * 3600
+ONLINE_CHECK_TIMEOUT = 5
+MAX_REMEMBERED_MISSES = 5000
+SERIES_TVDB = re.compile(r"^series-tvdb-(\d+)$")
 
 
 def _origin(url):
@@ -55,22 +69,45 @@ def theme_set(item):
     return (str(owner), items[0]) if items and owner else None
 
 
+def _digits(value):
+    text = str(value or "").strip()
+    return text if text.isdigit() else None
+
+
+def _online_theme_exists(url):
+    """True/False when Plex answers whether the theme exists; None when it cannot be reached."""
+    try:
+        with build_opener().open(Request(url, method="HEAD", headers={"User-Agent": "FoundersTheater"}),
+                                 timeout=ONLINE_CHECK_TIMEOUT) as response:
+            return 200 <= response.status < 300
+    except HTTPError as error:
+        return False if error.code in (403, 404, 410) else None
+    except (URLError, OSError, ValueError):
+        return None
+
+
 class ThemeMusic:
     """One theme player for the whole add-on, driven by the detail-page stack."""
 
-    def __init__(self, client, setting, player=None, relay_factory=None, monitor=None):
+    def __init__(self, client, setting, player=None, relay_factory=None, monitor=None, online=None,
+                 misses_path=None, check_online=None, clock=time.time):
         self.client = client
         self.setting = setting  # setting(key) -> value of a server setting
+        self.online = online or (lambda: False)  # Device setting: online TV themes
+        self.misses_path = misses_path
+        self.check_online = check_online or _online_theme_exists
+        self.clock = clock
         self._player = player
         self.relay_factory = relay_factory
         self.monitor = monitor
         self.stack = []
-        self.playing = None  # (owner, theme id) currently started by us
+        self.playing = None  # Key of the theme currently started by us
         self.suspended = False
         self.capability = None
         self.relay = None
         self.loop = False
         self.failures = 0
+        self._series_tvdb = {}
         self._lock = threading.Lock()
         self._watcher = None
         self._stop_watch = threading.Event()
@@ -109,9 +146,7 @@ class ThemeMusic:
             relay.close()
 
     # ------------------------------------------------------------ helpers
-    def _enabled(self):
-        if self.setting(ENABLED) is not True:
-            return False
+    def _server_themes(self):
         if self.capability is None:
             try:
                 answer = self.client.request("GET", "/catalog/themes/capabilities")
@@ -127,37 +162,53 @@ class ThemeMusic:
             self._player = xbmc.Player()
         return self._player
 
+    def _wanted(self, item):
+        """(key, title, make_url) for a page's theme: the server's, else an online TV theme."""
+        if self.setting(ENABLED) is not True:
+            return None
+        found = theme_set(item)
+        if found is not None and self._server_themes():
+            owner, theme = found
+            return (owner, theme["id"]), str(theme.get("title") or "Theme"), lambda: self._grant(owner, theme)
+        if not self.online():
+            return None
+        tvdb = self._tvdb_for(item)
+        if not tvdb or not self._online_available(tvdb):
+            return None
+        url = ONLINE_THEME_URL.format(tvdb)
+        return ("tvdb", tvdb), "Theme", lambda: url
+
     def _sync(self):
         """Make what plays match the top page."""
-        wanted = theme_set(self.stack[-1]) if self.stack and not self.suspended else None
-        if wanted is None or not self._enabled():
+        wanted = self._wanted(self.stack[-1]) if self.stack and not self.suspended else None
+        if wanted is None:
             self._stop()
             return
-        owner, theme = wanted
-        if self.playing == (owner, theme["id"]) and self._ours_playing():
+        key, title, make_url = wanted
+        if self.playing == key and self._ours_playing():
             return
         self._stop()  # Waits for our previous theme to end, so the check below sees other audio only.
         player = self.player()
         if player.isPlaying():  # Never start over other audio or video.
             return
-        self._start(owner, theme)
+        self._start(key, title, make_url)
 
-    def _start(self, owner, theme):
-        url = self._grant(owner, theme)
+    def _start(self, key, title, make_url):
+        url = make_url()
         if not url:
             return
         import xbmcgui
-        listitem = xbmcgui.ListItem(label=str(theme.get("title") or "Theme"), path=url)
+        listitem = xbmcgui.ListItem(label=title, path=url)
         listitem.setProperty("IsPlayable", "true")
         try:
-            listitem.getMusicInfoTag().setTitle(str(theme.get("title") or "Theme"))
+            listitem.getMusicInfoTag().setTitle(title)
         except AttributeError:
             pass
         with self._lock:
-            self.playing = (owner, theme["id"])
+            self.playing = key
         self.loop = self.setting(LOOP) is True  # Read here, never from the watcher thread.
         self.player().play(url, listitem)
-        self._watch(owner, theme)
+        self._watch(key, title, make_url)
 
     def _grant(self, owner, theme):
         path = "/catalog/items/{}/themes/{}/playback".format(quote(owner, safe=""), quote(str(theme["id"]), safe=""))
@@ -178,6 +229,71 @@ class ThemeMusic:
             relay = self.relay
         return relay.register(url, authenticated=_origin(url) == _origin(self.client.server_url))
 
+    # ---------------------------------------------------- online TV themes
+    def _tvdb_for(self, item):
+        """The show's TVDB id for a series, season or episode page; None for anything else."""
+        kind = item.get("type")
+        if kind == "series":
+            return _digits(item.get("tvdb_id"))
+        if kind not in ("season", "episode"):
+            return None
+        series_id = str(item.get("series_id") or "")
+        match = SERIES_TVDB.match(series_id)
+        if match:
+            return match.group(1)
+        if not series_id:
+            return None
+        if series_id not in self._series_tvdb:
+            try:
+                series = self.client.request("GET", "/catalog/items/{}".format(quote(series_id, safe="")))
+            except (ApiError, OSError):
+                return None
+            self._series_tvdb[series_id] = _digits(series.get("tvdb_id")) if isinstance(series, dict) else None
+        return self._series_tvdb[series_id]
+
+    def _misses(self):
+        if not self.misses_path:
+            return {}
+        try:
+            with open(self.misses_path) as handle:
+                data = json.load(handle)
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _save_misses(self, misses):
+        if not self.misses_path:
+            return
+        if len(misses) > MAX_REMEMBERED_MISSES:  # Oldest checks go first.
+            misses = dict(sorted(misses.items(), key=lambda entry: entry[1])[-MAX_REMEMBERED_MISSES:])
+        try:
+            temporary = self.misses_path + ".tmp"
+            with open(temporary, "w") as handle:
+                json.dump(misses, handle)
+            os.replace(temporary, self.misses_path)
+        except OSError:
+            pass
+
+    def _online_available(self, tvdb):
+        """Whether Plex has this show's theme; a miss is asked about again after a week."""
+        misses = self._misses()
+        checked = misses.get(tvdb)
+        now = self.clock()
+        if isinstance(checked, (int, float)) and now - checked < ONLINE_RECHECK_SECONDS:
+            return False
+        exists = self.check_online(ONLINE_THEME_URL.format(tvdb))
+        if exists is None:  # Could not tell (offline): try again next time.
+            return False
+        if exists:
+            if tvdb in misses:
+                del misses[tvdb]
+                self._save_misses(misses)
+            return True
+        misses[tvdb] = now
+        self._save_misses(misses)
+        return False
+
+    # -------------------------------------------------------------- state
     def _ours_playing(self):
         try:
             return self.player().isPlayingAudio()
@@ -201,8 +317,8 @@ class ThemeMusic:
                 else:
                     time.sleep(0.05)
 
-    def _watch(self, owner, theme):
-        """Loop the theme while its page stays open: a fresh grant each time."""
+    def _watch(self, key, title, make_url):
+        """Loop the theme while its page stays open: a fresh URL (grant) each time."""
         self._stop_watch = stop = threading.Event()
 
         def run():
@@ -210,28 +326,26 @@ class ThemeMusic:
             while not stop.wait(WATCH_SECONDS):
                 if self.monitor is not None and self.monitor.abortRequested():
                     return
-                playing = self._ours_playing()
-                if playing:
+                if self._ours_playing():
                     started = True
                     continue
                 if not started:
                     continue
                 with self._lock:
                     current = self.playing
-                if current != (owner, theme["id"]) or stop.is_set():
+                if current != key or stop.is_set():
                     return
                 if not self.loop:
                     with self._lock:
                         self.playing = None
                     return
                 try:
-                    url = self._grant(owner, theme)
+                    url = make_url()
                     import xbmcgui
                     with self._lock:  # suspend() between the check and play() must win.
-                        if not url or stop.is_set() or self.playing != (owner, theme["id"]):
+                        if not url or stop.is_set() or self.playing != key:
                             return
-                        self.player().play(url, xbmcgui.ListItem(label=str(theme.get("title") or "Theme"),
-                                                                 path=url))
+                        self.player().play(url, xbmcgui.ListItem(label=title, path=url))
                 except Exception:
                     self.failures += 1
                     return

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 msgid ""
 msgstr ""
-"Project-Id-Version: script.silo 0.7.0\n"
+"Project-Id-Version: script.silo 0.7.1\n"
 "Language: en_GB\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -375,4 +375,12 @@ msgstr ""
 
 msgctxt "#32102"
 msgid "Pressing Back during a Silo video stops it, like the Silo apps. Turn off to keep it playing behind Kodi's menus."
+msgstr ""
+
+msgctxt "#32103"
+msgid "Online TV themes"
+msgstr ""
+
+msgctxt "#32104"
+msgid "When your Silo server has no theme for a show, play it from Plex's public TV theme library by the show's TVDB id. Plex sees which show's theme you ask for."
 msgstr ""

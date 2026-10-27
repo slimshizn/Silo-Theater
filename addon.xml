@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="script.silo" name="Founders Theater - Silo for Kodi" version="0.7.0" provider-name="slimshizn">
+<addon id="script.silo" name="Founders Theater - Silo for Kodi" version="0.7.1" provider-name="slimshizn">
   <requires>
     <import addon="xbmc.python" version="3.0.1" />
     <import addon="xbmc.gui" version="5.17.0" />

@@ -116,7 +116,11 @@ class Application:
         """The add-on's single theme music player (theme_music.py)."""
         if getattr(self, "_theme", None) is None:
             from .theme_music import ThemeMusic
-            self._theme = ThemeMusic(self.client, self.server_setting, monitor=self.monitor)
+            folder = str(self._profile_dir())
+            self._theme = ThemeMusic(
+                self.client, self.server_setting, monitor=self.monitor,
+                online=lambda: self.options().get("online_tv_themes") is True,
+                misses_path=os.path.join(folder, "theme_misses.json") if os.path.isabs(folder) else None)
         return self._theme
 
     def _session_path(self, server_url):

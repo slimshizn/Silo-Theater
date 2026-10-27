@@ -233,6 +233,11 @@
           <default>false</default>
           <control type="toggle" />
         </setting>
+        <setting id="online_tv_themes" type="boolean" label="32103" help="32104">
+          <level>0</level>
+          <default>false</default>
+          <control type="toggle" />
+        </setting>
       </group>
     </category>
   </section>
