@@ -120,7 +120,8 @@ class Application:
             self._theme = ThemeMusic(
                 self.client, self.server_setting, monitor=self.monitor,
                 online=lambda: self.options().get("online_tv_themes") is True,
-                misses_path=os.path.join(folder, "theme_misses.json") if os.path.isabs(folder) else None)
+                misses_path=os.path.join(folder, "theme_misses.json") if os.path.isabs(folder) else None,
+                cache_dir=os.path.join(folder, "theme_cache") if os.path.isabs(folder) else None)
         return self._theme
 
     def _session_path(self, server_url):

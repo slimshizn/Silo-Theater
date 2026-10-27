@@ -48,15 +48,15 @@ make build
 make repository
 ```
 
-`make build` creates `dist/script.silo-0.7.2.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
+`make build` creates `dist/script.silo-0.7.3.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
-Version **0.7.2** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** under **Settings → This device → More device settings…** to limit converted streams. On Automatic quality, **Lower quality when buffering** (Settings → Playback) asks your server for a lower quality when playback keeps buffering, as the Silo apps do; choose Ask first or Never to change that. **Settings → Account → Test connection speed** measures your connection to Silo and can clear a limit Silo learned after buffering.
+Version **0.7.3** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** under **Settings → This device → More device settings…** to limit converted streams. On Automatic quality, **Lower quality when buffering** (Settings → Playback) asks your server for a lower quality when playback keeps buffering, as the Silo apps do; choose Ask first or Never to change that. **Settings → Account → Test connection speed** measures your connection to Silo and can clear a limit Silo learned after buffering.
 
 ### Theme music
 
-Turn on **Theme music** under **Settings → Audio and subtitles** to hear a title's theme on its details page, when your Silo server has theme songs. **Loop theme music** repeats it while the page stays open. It stops when you leave the page or start a video, and it never plays over other audio. Silo plays local theme files (`theme.mp3` or a `theme-music` folder next to a title). If your server has none for a show, turn on **Online TV themes** (same screen) to play the show's theme from Plex's public TV theme library by its TVDB id; Plex then sees which show's theme you ask for. A show Plex has no theme for is checked again after a week.
+Turn on **Theme music** under **Settings → Audio and subtitles** to hear a title's theme on its details page, when your Silo server has theme songs. **Loop theme music** repeats it while the page stays open. It is downloaded first (and kept in a small cache), so it starts without Kodi's buffering spinner, fades in from a low volume, and fades out when you leave the page or start a video; it never plays over other audio. Kodi has no per-song volume, so the fade briefly moves Kodi's own volume and then puts it back where you had it. Silo plays local theme files (`theme.mp3` or a `theme-music` folder next to a title). If your server has none for a show, turn on **Online TV themes** (same screen) to play the show's theme from Plex's public TV theme library by its TVDB id; Plex then sees which show's theme you ask for. A show Plex has no theme for is checked again after a week.
 
 ### During playback
 

@@ -1,6 +1,7 @@
 """Theme music follows the detail-page stack and never starts over other audio."""
 
 from pathlib import Path
+import os
 import sys
 import time
 from types import SimpleNamespace
@@ -47,6 +48,25 @@ class FakePlayer:
         self.file = self.other = None
 
 
+class FakeVolume:
+    """Kodi's application volume; ``levels`` records every change."""
+
+    def __init__(self, volume=80, muted=False):
+        self.value, self.muted, self.levels = volume, muted, []
+
+    def get(self):
+        return self.value, self.muted
+
+    def set(self, volume):
+        self.value = int(round(volume))
+        self.levels.append(self.value)
+
+
+def run_now(function):
+    function()
+    return None
+
+
 class FakeRelay:
     def __init__(self, client):
         self.routes, self.closed = [], False
@@ -86,7 +106,9 @@ class ThemeMusicTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def music(self):
-        theme = ThemeMusic(self.client, self.settings.get, player=self.player, relay_factory=FakeRelay)
+        self.volume = getattr(self, "volume", None) or FakeVolume()
+        theme = ThemeMusic(self.client, self.settings.get, player=self.player, relay_factory=FakeRelay,
+                           volume=self.volume, sleep=lambda seconds: False, spawn=run_now)
         theme._watch = lambda *args: None  # No loop thread in unit tests.
         self.addCleanup(theme.close)
         return theme
@@ -197,7 +219,8 @@ class OnlineTvThemeTests(unittest.TestCase):
     def music(self, online=True):
         theme = ThemeMusic(self.client, self.settings.get, player=self.player, relay_factory=FakeRelay,
                            online=lambda: online, misses_path=self.misses, check_online=self.check,
-                           clock=lambda: self.now)
+                           clock=lambda: self.now, volume=FakeVolume(), sleep=lambda seconds: False,
+                           spawn=run_now)
         theme._watch = lambda *args: None
         self.addCleanup(theme.close)
         return theme
@@ -281,7 +304,8 @@ class StopTests(ThemeMusicTests):
     def test_the_loop_never_restarts_over_other_playback(self):
         import silo.theme_music as module
         self.settings["ui.theme_music_loop"] = True
-        theme = ThemeMusic(self.client, self.settings.get, player=self.player, relay_factory=FakeRelay)
+        theme = ThemeMusic(self.client, self.settings.get, player=self.player, relay_factory=FakeRelay,
+                           volume=FakeVolume(), sleep=lambda seconds: False, spawn=run_now)
         self.addCleanup(theme.close)
         with patch.object(module, "WATCH_SECONDS", 0.01):
             theme.push(item("movie:1"))
@@ -296,7 +320,8 @@ class StopTests(ThemeMusicTests):
     def test_the_loop_restarts_the_theme_when_nothing_else_plays(self):
         import silo.theme_music as module
         self.settings["ui.theme_music_loop"] = True
-        theme = ThemeMusic(self.client, self.settings.get, player=self.player, relay_factory=FakeRelay)
+        theme = ThemeMusic(self.client, self.settings.get, player=self.player, relay_factory=FakeRelay,
+                           volume=FakeVolume(), sleep=lambda seconds: False, spawn=run_now)
         self.addCleanup(theme.close)
         with patch.object(module, "WATCH_SECONDS", 0.01):
             theme.push(item("movie:1"))
@@ -308,3 +333,90 @@ class StopTests(ThemeMusicTests):
                 if len(self.player.played) > 1:
                     break
         self.assertEqual(len(self.player.played), 2)
+
+
+class SmoothThemeTests(unittest.TestCase):
+    """Download first (no spinner), fade in from low, fade out and restore the viewer's volume."""
+
+    def setUp(self):
+        import tempfile, shutil
+        self.cache = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.cache, True)
+        self.settings = {"ui.theme_music_enabled": True, "ui.theme_music_loop": False}
+        self.player, self.client, self.volume = FakePlayer(), FakeClient(), FakeVolume(80)
+        self.fetched = []
+        modules = patch.dict(sys.modules, {"xbmcgui": SimpleNamespace(ListItem=lambda **kwargs: SimpleNamespace(
+            setProperty=lambda *a: None, getMusicInfoTag=lambda: SimpleNamespace(setTitle=lambda t: None)))})
+        modules.start()
+        self.addCleanup(modules.stop)
+
+    def fetch(self, url, path):
+        self.fetched.append(url)
+        if "broken" in url:
+            return False
+        with open(path, "wb") as handle:
+            handle.write(b"ID3" + b"\0" * 1000)
+        return True
+
+    def music(self):
+        theme = ThemeMusic(self.client, self.settings.get, player=self.player, relay_factory=FakeRelay,
+                           cache_dir=self.cache, fetch=self.fetch, volume=self.volume,
+                           sleep=lambda seconds: False, spawn=run_now)
+        theme._watch = lambda *args: None
+        self.addCleanup(theme.close)
+        return theme
+
+    def test_kodi_plays_a_downloaded_file_and_a_cached_theme_is_reused(self):
+        theme = self.music()
+        theme.push(item("movie:1"))
+        played = self.player.played[0]
+        self.assertTrue(played.startswith(self.cache) and played.endswith(".theme"))
+        self.assertEqual(self.fetched, ["http://127.0.0.1:9/relay/1"])
+        theme.pop()
+        theme.push(item("movie:1"))
+        self.assertEqual(len(self.fetched), 1)  # Second visit: no download, no grant.
+        self.assertEqual(self.player.played[1], played)
+
+    def test_it_fades_in_from_low_to_the_viewers_volume(self):
+        self.music().push(item("movie:1"))
+        levels = self.volume.levels
+        self.assertEqual(levels[0], 12)  # 15% of 80
+        self.assertEqual(levels, sorted(levels))
+        self.assertEqual(levels[-1], 80)
+
+    def test_a_video_waits_for_the_fade_out_and_gets_the_volume_back(self):
+        theme = self.music()
+        theme.push(item("movie:1"))
+        self.volume.levels.clear()
+        self.volume.value = 60  # The viewer turned it down while the theme played.
+        theme.suspend()
+        levels = self.volume.levels
+        self.assertEqual(levels[-1], 60)
+        self.assertEqual(levels[:-1], sorted(levels[:-1], reverse=True))
+        self.assertEqual((self.player.file, self.player.stops), (None, 1))
+
+    def test_a_muted_kodi_is_never_touched(self):
+        self.volume.muted = True
+        theme = self.music()
+        theme.push(item("movie:1"))
+        theme.suspend()
+        self.assertEqual(self.volume.levels, [])
+        self.assertEqual(len(self.player.played), 1)
+
+    def test_a_failed_download_plays_nothing(self):
+        self.client.grant_url = "/api/v2/catalog/items/x/themes/t1/broken"
+        theme = self.music()
+        theme.relay_factory = lambda client: SimpleNamespace(register=lambda url, authenticated=True: url,
+                                                            close=lambda: None)
+        theme.push(item("movie:1"))
+        self.assertEqual((self.player.played, self.volume.levels), ([], []))
+
+    def test_the_cache_stays_under_its_limit(self):
+        import silo.theme_music as module
+        with patch.object(module, "CACHE_LIMIT_BYTES", 2500):
+            theme = self.music()
+            for index in range(5):
+                theme.push(item("movie:{}".format(index), theme_id="t{}".format(index)))
+                theme.pop()
+        files = [name for name in os.listdir(self.cache) if name.endswith(".theme")]
+        self.assertLessEqual(len(files), 2)
