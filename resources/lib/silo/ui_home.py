@@ -179,6 +179,7 @@ class HomeWindow(xbmcgui.WindowXML):
         self.kind = "movie"
         self.library = None
         self.sort = "title"
+        self.reversed = False
         self.filters = {}
         self.filter_options_cache = {}
         self.letters = None
@@ -647,6 +648,7 @@ class HomeWindow(xbmcgui.WindowXML):
         self.set_tab("movies" if kind == "movie" else "series")
         self.library = None
         self.sort = "title"
+        self.reversed = False
         self.update_chips()
         grid = self.getControl(GRID)
         grid.setPosition(GRID_LEFT, LIBRARY_GRID_TOP)
@@ -654,8 +656,14 @@ class HomeWindow(xbmcgui.WindowXML):
         grid.controlUp(self.getControl(LIBRARY_CHIP))
         self.load_grid(self.library_params())
 
+    def sort_value(self):
+        """The catalog sort term: a leading "-" sorts descending, so reversing flips the sign."""
+        if not self.reversed:
+            return self.sort
+        return self.sort[1:] if self.sort.startswith("-") else "-" + self.sort
+
     def library_params(self):
-        params = {"type": self.kind, "sort": self.sort}
+        params = {"type": self.kind, "sort": self.sort_value()}
         if self.library is not None:
             params["library_id"] = self.library["id"]
         groups = filter_groups(self.filters)
@@ -666,6 +674,8 @@ class HomeWindow(xbmcgui.WindowXML):
     def update_chips(self):
         name = str(self.library.get("name") or "Library") if self.library else "All"
         sort = next(chip for value, _label, chip in SORTS if value == self.sort)
+        if self.reversed:
+            sort += " (reversed)"
         count = active_facets(self.filters)
         chips = [(LIBRARY_CHIP, "Library: " + name, True), (SORT_CHIP, "Sort: " + sort, True),
                  (FILTER_CHIP, "Filters", False)]
@@ -704,13 +714,19 @@ class HomeWindow(xbmcgui.WindowXML):
         self.load_grid(self.library_params())
 
     def choose_sort(self):
+        """Pick a sort, or the last row to flip the current one's direction."""
         values = [value for value, _label, _chip in SORTS]
         current = values.index(self.sort)
-        choice = self.application.dialog.select("Sort by", [label for _value, label, _chip in SORTS],
-                                                preselect=current)
+        labels = [label for _value, label, _chip in SORTS]
+        labels.append("Reverse order: " + ("On" if self.reversed else "Off"))
+        choice = self.application.dialog.select("Sort by", labels, preselect=current)
         if choice < 0 or choice == current:
             return
-        self.sort = values[choice]
+        if choice == len(values):
+            self.reversed = not self.reversed
+        else:
+            # A new sort starts in its natural direction.
+            self.sort, self.reversed = values[choice], False
         self.update_chips()
         self.load_grid(self.library_params())
 
@@ -882,7 +898,7 @@ class HomeWindow(xbmcgui.WindowXML):
     # ------------------------------------------------------------ A–Z rail
 
     def rail_active(self):
-        return self.tab in TAB_KINDS and self.sort == "title"
+        return self.tab in TAB_KINDS and self.sort == "title" and not self.reversed
 
     def update_rail(self):
         active = self.rail_active()

@@ -302,6 +302,31 @@ class LibraryTests(unittest.TestCase):
         window.application.browse.assert_called_with({"type": "series", "sort": "-added_at", "library_id": 4})
         window.getControl(ui_home.SORT_CHIP).setLabel.assert_called_with("Sort: Recently added")
 
+    def test_reverse_order_flips_the_sort_direction(self):
+        window = open_window()
+        window.application.browse.return_value = page(2)
+        window.onClick(211)
+        reverse = len(ui_home.SORTS)
+        window.application.dialog.select.return_value = reverse
+        window.onClick(ui_home.SORT_CHIP)
+        self.assertEqual(window.application.dialog.select.call_args.args[1][-1], "Reverse order: Off")
+        window.application.browse.assert_called_with({"type": "movie", "sort": "-title"})
+        window.getControl(ui_home.SORT_CHIP).setLabel.assert_called_with("Sort: Title (reversed)")
+        self.assertEqual(window.properties["silo.rail"], "")  # The A–Z rail only jumps through A→Z.
+        # A new sort starts in its natural direction; reversing it again flips that.
+        window.application.dialog.select.return_value = 1
+        window.onClick(ui_home.SORT_CHIP)
+        window.application.browse.assert_called_with({"type": "movie", "sort": "-added_at"})
+        window.getControl(ui_home.SORT_CHIP).setLabel.assert_called_with("Sort: Recently added")
+        window.application.dialog.select.return_value = reverse
+        window.onClick(ui_home.SORT_CHIP)
+        window.application.browse.assert_called_with({"type": "movie", "sort": "added_at"})
+        window.getControl(ui_home.SORT_CHIP).setLabel.assert_called_with("Sort: Recently added (reversed)")
+        self.assertEqual(window.application.dialog.select.call_args.args[1][-1], "Reverse order: Off")
+        window.onClick(ui_home.SORT_CHIP)
+        self.assertEqual(window.application.dialog.select.call_args.args[1][-1], "Reverse order: On")
+        window.application.browse.assert_called_with({"type": "movie", "sort": "-added_at"})
+
     def test_cancelled_choice_does_not_reload(self):
         window = open_window()
         window.application.browse.return_value = page(2)
@@ -735,7 +760,7 @@ class SortAndShuffleTests(unittest.TestCase):
         window.application.browse.assert_called_with({"type": "movie", "sort": "-rating_imdb"})
         self.assertEqual(window.application.dialog.select.call_args.args[1], [
             "Title A–Z", "Recently added", "Release date", "Year", "Rating", "Runtime", "Recently watched",
-            "Most played"])
+            "Most played", "Reverse order: Off"])
         # The A–Z rail only makes sense in title order.
         self.assertEqual(window.properties["silo.rail"], "")
         window.getControl(ui_home.RAIL_GROUP).setVisible.assert_called_with(False)
@@ -1058,11 +1083,48 @@ class SkinTests(unittest.TestCase):
         self.assertEqual(labels, ["Switch profile", "Watchlist", "Favorites", "History", "Settings",
                                   "Edit home rows", "Switch server", "Sign out"])
 
-    def test_tabs_are_in_android_order(self):
-        cluster = next(control for control in self.tree.iter("control") if control.get("id") == "202")
-        labels = [button.findtext("label") for button in cluster.iter("control")
-                  if button.get("type") == "button" and button.findtext("label")]
-        self.assertEqual(labels, ["Home", "Movies", "Series", "For You", "Calendar", "Requests"])
+    def control(self, control_id):
+        return next(control for control in self.tree.iter("control") if control.get("id") == str(control_id))
+
+    def test_tabs_are_in_android_order_and_draw_their_name_once(self):
+        names = []
+        for _key, button_id, group_id, _width in ui_home.TABS:
+            group = self.control(group_id)
+            # The button draws no text: a Kodi button pads and scrolls its label, and a second
+            # overlay label for the selected tab showed through behind it.
+            self.assertEqual(self.control(button_id).findtext("label") or "", "", button_id)
+            captions = [node for node in group.iter("control") if node.get("type") == "label"]
+            self.assertEqual(len(captions), 3, group_id)  # Idle, selected and focused.
+            self.assertEqual(len({node.findtext("label") for node in captions}), 1, group_id)
+            for caption in captions:
+                self.assertNotEqual(caption.findtext("scroll"), "true")
+            names.append(captions[0].findtext("label"))
+            visible = [node.findtext("visible") for node in captions]
+            self.assertIn("Control.HasFocus({})".format(button_id), visible)
+        self.assertEqual(names, ["Home", "Movies", "Series", "For You", "Calendar", "Requests"])
+
+    def test_every_top_bar_shows_the_clock_top_right(self):
+        for name in ("SiloHome.xml", "SiloBrowseRows.xml", "SiloBrowseGrid.xml", "SiloPerson.xml",
+                     "SiloRequests.xml"):
+            tree = ET.parse(SKIN / "1080i" / name)
+            clocks = [node for node in tree.iter("control")
+                      if node.get("type") == "label" and node.findtext("label") == "$INFO[System.Time]"]
+            self.assertEqual(len(clocks), 1, name)
+            self.assertEqual(clocks[0].findtext("align"), "right", name)
+            right = int(clocks[0].findtext("left")) + int(clocks[0].findtext("width"))
+            self.assertGreaterEqual(right, 1700, name)
+
+    def test_focused_avatar_gets_a_white_disc_like_the_tabs(self):
+        avatar = next(group for group in self.tree.iter("control")
+                      if any(child.get("id") == str(ui_home.AVATAR) for child in group))
+        focused = "Control.HasFocus({})".format(ui_home.AVATAR)
+        discs = [node for node in avatar if node.get("type") == "image" and node.findtext("texture") == "circle.png"
+                 and node.findtext("visible") == focused]
+        self.assertEqual(len(discs), 1)
+        self.assertEqual(discs[0].find("texture").get("colordiffuse"), "FFEDEDED")
+        initials = [node for node in avatar if node.get("type") == "label"]
+        self.assertEqual({node.findtext("textcolor") for node in initials
+                          if node.findtext("visible") == focused}, {"FF000000"})
 
     def test_generator_output_is_current(self):
         sys.path.insert(0, str(ROOT / "scripts"))

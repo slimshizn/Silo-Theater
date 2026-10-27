@@ -189,23 +189,36 @@ def top_bar():
     tabs = []
     ids = [201] + [tab[2] for tab in TABS] + [230]
     for index, (key, text, button_id, group_id, width) in enumerate(TABS):
-        selected = "String.IsEqual(Window.Property(silo.tab),{}) + !Control.HasFocus({})".format(key, button_id)
+        focused = "Control.HasFocus({})".format(button_id)
+        current = "String.IsEqual(Window.Property(silo.tab),{})".format(key)
+        selected = "{} + !{}".format(current, focused)
+        # The name is drawn once, by labels that never scroll; the button only takes focus.
         tabs.append(group(group_id, 80 + sum(tab[4] + 8 for tab in TABS[:index]), 2, width, 60, [
             image(0, 0, width, 60, "pill60_selected.png", border=30, condition=selected),
-            button(button_id, 0, 0, width, 60, text, color=TAB_IDLE,
+            button(button_id, 0, 0, width, 60, "",
                    navigation=nav(button_id, left=ids[index], right=ids[index + 2])),
+            label(0, 0, width, 60, text, "font25_title", TAB_IDLE, "center",
+                  condition="!{} + !{}".format(current, focused)),
             label(0, 0, width, 60, text, "font25_title", TEXT, "center", condition=selected),
+            label(0, 0, width, 60, text, "font25_title", BLACK, "center", condition=focused),
         ]))
+    # Focus fills a white disc behind the avatar, like the white pill on a focused tab;
+    # behind a photo it shows as a white rim.
+    avatar_focus = "Control.HasFocus(230)"
+    initials = "$INFO[Window.Property(silo.initials)]"
     avatar = [button(230, 0, 0, 56, 56, "", focus=None, navigation=nav(230, left=TABS[-1][2])),
-              image(0, 0, 56, 56, "circle.png", color="2EFFFFFF"),
-              label(0, 0, 56, 56, "$INFO[Window.Property(silo.initials)]", "font25_title", TEXT, "center"),
+              image(-6, -6, 68, 68, "circle.png", color=TEXT, condition=avatar_focus),
+              image(0, 0, 56, 56, "circle.png", color="2EFFFFFF", condition="!" + avatar_focus),
+              label(0, 0, 56, 56, initials, "font25_title", TEXT, "center", condition="!" + avatar_focus),
+              label(0, 0, 56, 56, initials, "font25_title", BLACK, "center", condition=avatar_focus),
               image(0, 0, 56, 56, "$INFO[Window.Property(silo.avatar)]", diffuse="mask_circle.png",
-                    aspect="scale", background=True),
-              image(-4, -4, 64, 64, "ring_circle.png", color=TEXT, condition="Control.HasFocus(230)")]
+                    aspect="scale", background=True)]
     return group(200, 0, 56, 1920, 64, [
         image(88, 12, 40, 40, "brand_icon.png", aspect="keep"),
         label(142, 0, 466, 64, "[COLOR FFE8CF8F]FOUNDERS[/COLOR] THEATER", "font25_title", "FFFFFFFF"),
         group(202, 404, 0, 1200, 64, search + tabs),
+        # Kodi's clock, in the time format set in Kodi, just left of the avatar.
+        label(1560, 0, 200, 64, "$INFO[System.Time]", "font25_title", SECONDARY, "right"),
         group(None, 1776, 4, 56, 56, avatar),
     ], animation=dim)
 

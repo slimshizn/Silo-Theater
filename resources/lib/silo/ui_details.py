@@ -20,20 +20,23 @@ import xbmcgui
 from . import present, svc_personal, svc_shuffle
 from .media import (available_versions, default_version, format_time, is_multipart, resume_position,
                     subtitle_choices, version_label, version_name)
+from .player_extras import audio_track_label
 from .ui_common import (ACTION_DOWN, ACTION_LEFT, ACTION_RIGHT, ACTION_UP, BACK_ACTIONS, Debouncer,
                         card_list_item, set_properties)
 
 PLAY, RESUME, VERSION, START_OVER, NEXT_UP, SUBTITLES = 100, 101, 103, 104, 105, 106
-WATCHLIST, FAVORITE, MORE = 107, 108, 109
+WATCHLIST, FAVORITE, MORE, AUDIO = 107, 108, 109, 110
+# Read more opens the full synopsis when it is longer than the three lines the hero shows.
+READ_MORE, PLOT_PREVIEW = 112, 230
 SEASONS, EPISODES, CAST, SIMILAR, EXTRAS, FACTS = 510, 520, 530, 540, 560, 570
 PAGE, CAST_GROUP, SIMILAR_GROUP, EXTRAS_GROUP, FACTS_GROUP = 1000, 3000, 4000, 5000, 6000
 SUPERTITLE, TITLE, TITLE2 = 1101, 1102, 1103
 CHIP, CHIP_LABEL, BADGE, BADGE_LABEL, META = 1201, 1202, 1211, 1221, 1230
 # A button's group id is 1300 + its id; the order is the on-screen order.
-BUTTON_ORDER = (NEXT_UP, PLAY, RESUME, START_OVER, VERSION, SUBTITLES, WATCHLIST, FAVORITE, MORE)
+BUTTON_ORDER = (NEXT_UP, PLAY, RESUME, START_OVER, VERSION, AUDIO, SUBTITLES, WATCHLIST, FAVORITE, MORE)
 CAPSULES = (NEXT_UP, PLAY)
-ZONES = ("buttons", "seasons", "episodes", "cast", "extras", "similar", "facts")
-ZONE_CONTROLS = {"seasons": SEASONS, "episodes": EPISODES, "cast": CAST, "extras": EXTRAS,
+ZONES = ("synopsis", "buttons", "seasons", "episodes", "cast", "extras", "similar", "facts")
+ZONE_CONTROLS = {"synopsis": READ_MORE, "seasons": SEASONS, "episodes": EPISODES, "cast": CAST, "extras": EXTRAS,
                  "similar": SIMILAR, "facts": FACTS}
 
 LEFT = 100
@@ -90,8 +93,9 @@ def split_title(title):
 
 
 def capsule_width(text):
-    # Icon and padding, plus roughly 15 px per character of font25_title.
-    return max(170, 74 + 15 * len(text) + 34)
+    # The icon and its padding (74 px), the text at up to 16 px per character of
+    # font25_title, then the pill's right padding. The text never scrolls, so err wide.
+    return max(170, 74 + 16 * len(text) + 32)
 
 
 def chip_width(text):
@@ -314,6 +318,10 @@ class DetailsWindow(xbmcgui.WindowXML):
         # It starts from the remembered choice or the profile's preferences.
         self.subtitle_index = None
         self.subtitle_source = "auto"
+        # Audio ordinal: what playback would choose, until Audio picks another.
+        self.audio_index = None
+        self.audio_source = "auto"
+        self.audio_label = ""
         self.can_resume = False
         self.show_plot = True
         self.hide_spoilers = False
@@ -334,6 +342,7 @@ class DetailsWindow(xbmcgui.WindowXML):
         self.last_button = None
         self.focus_id = None
         self.hero_episode = None
+        self.hero_overview = ""
         self.scroll_offset = 0
         self.cast_top = SECTIONS_TOP
         self.similar_top = SECTIONS_TOP
@@ -355,6 +364,8 @@ class DetailsWindow(xbmcgui.WindowXML):
         self.update_file_selection()
         self.default_subtitle()
         self.update_subtitle_selection()
+        self.default_audio()
+        self.update_audio_selection()
         self.load_children()
         self.load_cast()
         self.load_extras()
@@ -367,7 +378,8 @@ class DetailsWindow(xbmcgui.WindowXML):
         if PLAY in self.focusable_buttons:
             self.focus_control(PLAY)
         elif zones:
-            self.focus_zone(zones[0])
+            # Read more sits above the buttons but is never where the page opens.
+            self.focus_zone(next((zone for zone in zones if zone != "synopsis"), zones[0]))
         self.load_similar()
 
     def onAction(self, action):
@@ -402,10 +414,15 @@ class DetailsWindow(xbmcgui.WindowXML):
         self.application.guard(lambda: self._click(control_id))
 
     def _click(self, control_id):
-        if control_id == VERSION:
+        if control_id == READ_MORE:
+            title = _text(self.item.get("title") or self.item.get("name")) or "Synopsis"
+            self.application.dialog.textviewer(title, self.hero_overview)
+        elif control_id == VERSION:
             file_id = self.application.choose_file(self.item, self.selected_file_id)
             if file_id is not None:
                 self.refresh(file_id)
+        elif control_id == AUDIO:
+            self.choose_audio()
         elif control_id == SUBTITLES:
             choices = self.subtitle_options()
             chosen = self.application.choose_subtitle(choices, self.subtitle_index)
@@ -423,8 +440,10 @@ class DetailsWindow(xbmcgui.WindowXML):
         elif control_id in (PLAY, RESUME, START_OVER):
             resume = {PLAY: None, RESUME: True, START_OVER: False}[control_id]
             # Play the version shown on this screen; Version is how to change it.
+            # A track picked with Audio is passed on; otherwise preferences decide.
+            audio = {"audio_index": self.audio_index} if self.audio_source == "picked" else {}
             file_id = self.application.play(self.item, resume=resume, file_id=self.selected_file_id,
-                                            subtitle_index=self.subtitle_index)
+                                            subtitle_index=self.subtitle_index, **audio)
             if file_id is not None:
                 self.refresh(file_id, after_playback=True)
         elif control_id == SEASONS:
@@ -492,6 +511,47 @@ class DetailsWindow(xbmcgui.WindowXML):
         self.subtitle_label = "Subtitles: " + label
         self.setProperty("silo.subtitle_label", self.subtitle_label)
 
+    def audio_options(self):
+        """(ordinal, label) for each audio track of the version on screen."""
+        version = default_version(self.item, preferred_file_id=self.selected_file_id)
+        tracks = (version or {}).get("audio_tracks") or []
+        return [(index, audio_track_label(track, index)) for index, track in enumerate(tracks)]
+
+    def default_audio(self):
+        """Start from the track playback would choose: Silo's saved preference first."""
+        version = default_version(self.item, preferred_file_id=self.selected_file_id)
+        try:
+            index, _language = self.application.audio_default(self.item, version)
+        except (AttributeError, TypeError, ValueError):
+            index = None
+        self.audio_index = index if isinstance(index, int) and not isinstance(index, bool) else None
+        self.audio_source = "auto"
+
+    def update_audio_selection(self):
+        choices = dict(self.audio_options())
+        if self.audio_index not in choices:
+            self.audio_index, self.audio_source = None, "auto"
+        self.setProperty("silo.has_audio_choice", "true" if len(choices) > 1 else "")
+        label = choices.get(self.audio_index, "Automatic")
+        if self.audio_index is not None and self.audio_source == "auto":
+            label += " (Auto)"  # What the profile's audio preferences will play.
+        self.audio_label = "Audio: " + label
+
+    def choose_audio(self):
+        choices = self.audio_options()
+        indexes = [index for index, _label in choices]
+        current = indexes.index(self.audio_index) if self.audio_index in indexes else 0
+        chosen = self.application.dialog.select("Audio", [label for _index, label in choices], preselect=current)
+        if not isinstance(chosen, int) or not 0 <= chosen < len(choices):
+            return
+        self.audio_index, self.audio_source = indexes[chosen], "picked"
+        version = default_version(self.item, preferred_file_id=self.selected_file_id)
+        remember = getattr(self.application, "remember_audio", None)
+        if callable(remember):
+            self.application.guard(lambda: remember(self.item, version, indexes[chosen]))
+        self.update_audio_selection()
+        self.setProperty("silo.hint", self.hint(AUDIO))
+
     def update_resume(self):
         resume = self.application.resume_seconds(self.item)
         playable = self.application.is_playable(self.item)
@@ -513,9 +573,11 @@ class DetailsWindow(xbmcgui.WindowXML):
             # Another version has its own tracks, and a pick made in the player
             # menu during playback is now the remembered choice.
             self.default_subtitle()
+            self.default_audio()
         self.file_confirmed = any(version["file_id"] == file_id for version in available_versions(item))
         self.update_file_selection()
         self.update_subtitle_selection()
+        self.update_audio_selection()
         self.update_actions()
         if self.hero_episode is None:
             self.show_hero()
@@ -535,6 +597,7 @@ class DetailsWindow(xbmcgui.WindowXML):
             RESUME: self.can_resume and start_first,
             START_OVER: self.can_resume,
             VERSION: playable and len(available_versions(self.item)) > 1,
+            AUDIO: playable and len(self.audio_options()) > 1,
             SUBTITLES: playable and bool(self.subtitle_options()),
             WATCHLIST: bool(self.item.get("content_id")),
             FAVORITE: bool(self.item.get("content_id")),
@@ -603,6 +666,8 @@ class DetailsWindow(xbmcgui.WindowXML):
             return "Version: " + version_label(version) if version else ""
         if control_id == SUBTITLES:
             return self.subtitle_label
+        if control_id == AUDIO:
+            return self.audio_label
         marks = svc_personal.state(self.item)
         if control_id == WATCHLIST:
             return "Remove from watchlist" if marks["watchlist"] else "Add to watchlist"
@@ -636,11 +701,13 @@ class DetailsWindow(xbmcgui.WindowXML):
             "silo.rating": rating,
             "silo.meta": present.detail_meta(item),
             "silo.plot": overview,
+            "silo.plot_more": "true" if len(overview) > PLOT_PREVIEW else "",
             # The credit stays the page's own so the rows below never jump.
             "silo.credit": present.credit_line(self.item),
         }
         if episode is None:
             values["silo.backdrop"] = image(item, "backdrop")
+        self.hero_overview = overview
         set_properties(self, values)
         self.layout_title(bool(supertitle), bool(title2))
         self.layout_meta(rating, [badge for badge in present.badges(item, version) if badge != rating])
@@ -1035,6 +1102,7 @@ class DetailsWindow(xbmcgui.WindowXML):
 
     def available_zones(self):
         present_zones = {
+            "synopsis": len(self.hero_overview) > PLOT_PREVIEW,
             "buttons": bool(self.focusable_buttons),
             "seasons": bool(self.seasons),
             "episodes": bool(self.episodes),

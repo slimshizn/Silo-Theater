@@ -60,6 +60,7 @@ BUTTONS = (
     (101, "circle", "icon_resume.png", has("silo.resume_button"), ENABLED),
     (104, "circle", "icon_restart.png", has("silo.resume"), ENABLED),
     (103, "circle", "icon_versions.png", has("silo.multi_version"), ENABLED),
+    (110, "circle", "icon_audio.png", has("silo.playable") + " + " + has("silo.has_audio_choice"), None),
     (106, "circle", "icon_subtitles.png", has("silo.playable") + " + " + has("silo.has_subtitles"), None),
     (107, "circle", ("swap", "icon_bookmark.png", "icon_bookmark_filled.png", "silo.in_watchlist"), MARKS, None),
     (108, "circle", ("swap", "icon_heart.png", "icon_heart_filled.png", "silo.favorite"), MARKS, None),
@@ -113,27 +114,35 @@ def button(index):
     links = (nav(control_id, "onleft", reversed(order[:index])) + nav(control_id, "onright", order[index + 1:])
              + "<onup>{0}</onup><ondown>{0}</ondown>".format(control_id))
     gating = visible(show) + ("<enable>{}</enable>".format(enable) if enable else "")
+    focused = "Control.HasFocus({})".format(control_id)
+    captions = []
     if kind == "capsule":
+        # The text is drawn beside the button, not as its label: Kodi pads a button
+        # label by textoffsetx on both sides, which squeezed short labels into a scroll.
         width, body = 240, (
-            '<label>$INFO[Window.Property({})]</label><font>font25_title</font><textoffsetx>74</textoffsetx>'
-            '<align>left</align><aligny>center</aligny>'
-            '<textcolor>{}</textcolor><focusedcolor>FF000000</focusedcolor><disabledcolor>66EDEDED</disabledcolor>'
-            '<texturefocus border="38" colordiffuse="{}">pill76.png</texturefocus>'
-            '<texturenofocus border="38">pill76_idle.png</texturenofocus>').format(
-                BUTTON_LABELS[control_id], TEXT, TEXT)
+            '<label></label><texturefocus border="38" colordiffuse="{}">pill76.png</texturefocus>'
+            '<texturenofocus border="38">pill76_idle.png</texturenofocus>').format(TEXT)
         icon_left = 24
+        text = "$INFO[Window.Property({})]".format(BUTTON_LABELS[control_id])
+        enabled = "Control.IsEnabled({})".format(control_id)
+        centered = "<aligny>center</aligny>"
+        captions = [
+            label(74, 0, 1000, 76, text, "font25_title", TEXT,
+                  centered + visible("!{} + {}".format(focused, enabled))),
+            label(74, 0, 1000, 76, text, "font25_title", "FF000000", centered + visible(focused)),
+            label(74, 0, 1000, 76, text, "font25_title", "66EDEDED", centered + visible("!" + enabled)),
+        ]
     else:
         width, body = 76, (
             '<label></label><texturefocus colordiffuse="{}">circle.png</texturefocus>'
             '<texturenofocus>circle_idle.png</texturenofocus>').format(TEXT)
         icon_left = 18
-    focused = "Control.HasFocus({})".format(control_id)
     return "\n".join([
         '      <control type="group" id="{}"><left>100</left><top>556</top><width>{}</width><height>76</height>{}'
         .format(1300 + control_id, width, visible(show)),
         '        <control type="button" id="{}"><left>0</left><top>0</top><width>{}</width><height>76</height>'
         '{}{}{}</control>'.format(control_id, width, body, links, gating),
-    ] + ["        " + control for control in icon_controls(icon, icon_left, focused)] + [
+    ] + ["        " + control for control in icon_controls(icon, icon_left, focused) + captions] + [
         "      </control>",
     ])
 
@@ -363,6 +372,13 @@ def hero():
         '      <control type="textbox" id="1240"><left>100</left><top>346</top><width>1080</width><height>114</height>'
         '<font>font27</font><textcolor>D9EDEDED</textcolor><label>$INFO[{}]</label>{}</control>'.format(
             prop("silo.plot"), visible(has("silo.plot"))),
+        # Read more: the full synopsis when it runs past the box (ui_details.READ_MORE).
+        '      <control type="button" id="112"><left>1200</left><top>408</top><width>240</width><height>52</height>'
+        '<label>Read more</label><font>font25_title</font><textcolor>{0}</textcolor>'
+        '<focusedcolor>FF000000</focusedcolor><align>center</align><aligny>center</aligny>'
+        '<textoffsetx>0</textoffsetx><texturefocus border="26" colordiffuse="{0}">pill52.png</texturefocus>'
+        '<texturenofocus border="26">pill52_idle.png</texturenofocus>{1}{2}</control>'.format(
+            TEXT, self_links(112), visible(has("silo.plot_more"))),
         "      " + label(100, 466, 1080, 32, "$INFO[{}]".format(prop("silo.credit")), "font10", DIM, "", 1250),
         "      " + label(100, 644, 1080, 32, "$INFO[{}]".format(prop("silo.hint")), "font12", SECONDARY,
                          visible(has("silo.hint")), 1260),

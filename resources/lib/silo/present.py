@@ -115,12 +115,29 @@ def card_subtitle(item, wide=False):
 
 
 def resolution_badge(value):
+    """8K, 4K, FHD (1080), HD (720) or SD (576 and below) from Silo's 480p…4320p labels."""
     value = _text(value).lower()
-    if value in ("4k", "uhd") or value.startswith("2160"):
+    if value in ("4k", "uhd"):
         return "4K"
-    if value in ("1080p", "1080i", "720p"):
+    if value == "sd":
+        return "SD"
+    digits = ""
+    for character in value:
+        if not character.isdigit():
+            break
+        digits += character
+    if not digits:
+        return ""
+    height = int(digits)
+    if height >= 4320:
+        return "8K"
+    if height >= 2160:
+        return "4K"
+    if height >= 1080:
+        return "FHD"
+    if height >= 720:
         return "HD"
-    return ""
+    return "SD" if height > 0 else ""
 
 
 def hdr_badge(value):

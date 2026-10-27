@@ -526,6 +526,17 @@ class ApplicationFlowTests(unittest.TestCase):
         for method, path in (("GET", "/catalog/filters"), ("GET", "/profiles"), ("POST", "/catalog/letters"),
                              ("GET", "/recommendations/discover")):
             self.assertEqual(client._with_artwork(method, path, {"q": 1}), {"q": 1}, path)
+        # Silo rejects undeclared query parameters (422 "did not pass validation"), so artwork
+        # parameters go only to the endpoints whose contract declares image_size.
+        for path in ("/library/7/collections", "/library/7/collections/12/items", "/library/7/layout",
+                     "/watchlist/movie:1", "/favorites/movie:1", "/watch/movie:1/trickplay", "/home/capabilities",
+                     "/shuffles/capabilities", "/catalog/items/series:1/themes/3/audio", "/catalog/people/5",
+                     "/history-imports/runs"):
+            self.assertEqual(client._with_artwork("GET", path, {"limit": 50}), {"limit": 50}, path)
+        for path in ("/library/7/sections", "/library/7/sections/3/items", "/home/layout", "/home/sections/9/items",
+                     "/catalog/items/series:1/episodes", "/catalog/series/series:1/seasons/2/episodes",
+                     "/watchlist", "/favorites", "/history", "/shuffles/abc", "/watch/movie:1"):
+            self.assertEqual(client._with_artwork("GET", path, None).get("image_size"), "large", path)
 
     def test_session_storage_failure_is_shown_inside_startup_error_handler(self):
         self.app.store = None

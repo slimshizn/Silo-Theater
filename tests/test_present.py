@@ -54,9 +54,16 @@ class CardTests(unittest.TestCase):
 class HeroTests(unittest.TestCase):
     def test_badges_follow_android_order(self):
         self.assertEqual(present.badges(EPISODE), ["4K", "DOLBY VISION", "ATMOS", "TV-MA"])
-        self.assertEqual(present.badges(MOVIE), ["HD", "EAC3", "PG-13"])
+        self.assertEqual(present.badges(MOVIE), ["FHD", "EAC3", "PG-13"])
         version = {"resolution": "2160p", "hdr": True, "codec_audio": "truehd"}
         self.assertEqual(present.badges({}, version), ["4K", "HDR", "TRUEHD"])
+
+    def test_resolution_badges_tell_each_tier_apart(self):
+        # Silo labels files 480p, 720p, 1080p, 2160p or 4320p.
+        for value, badge in (("4320p", "8K"), ("2160p", "4K"), ("4K", "4K"), ("uhd", "4K"), ("1080p", "FHD"),
+                             ("1080i", "FHD"), ("720p", "HD"), ("576p", "SD"), ("480p", "SD"), ("480i", "SD"),
+                             ("sd", "SD"), ("", ""), (None, ""), ("unknown", "")):
+            self.assertEqual(present.resolution_badge(value), badge, value)
 
     def test_hero_meta_for_episode_and_movie(self):
         self.assertEqual(present.hero_meta(EPISODE), "S2 E8 · The Return · 52 min · 19m left")

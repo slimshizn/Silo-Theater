@@ -6223,9 +6223,9 @@
             <top>0</top>
             <width>124</width>
             <height>60</height>
-            <label>Home</label>
+            <label/>
             <font>font25_title</font>
-            <textcolor>9EEDEDED</textcolor>
+            <textcolor>FFEDEDED</textcolor>
             <focusedcolor>FF000000</focusedcolor>
             <align>center</align>
             <aligny>center</aligny>
@@ -6242,11 +6242,35 @@
             <width>124</width>
             <height>60</height>
             <font>font25_title</font>
+            <textcolor>9EEDEDED</textcolor>
+            <align>center</align>
+            <aligny>center</aligny>
+            <label>Home</label>
+            <visible>!String.IsEqual(Window.Property(silo.tab),home) + !Control.HasFocus(210)</visible>
+          </control>
+          <control type="label">
+            <left>0</left>
+            <top>0</top>
+            <width>124</width>
+            <height>60</height>
+            <font>font25_title</font>
             <textcolor>FFEDEDED</textcolor>
             <align>center</align>
             <aligny>center</aligny>
             <label>Home</label>
             <visible>String.IsEqual(Window.Property(silo.tab),home) + !Control.HasFocus(210)</visible>
+          </control>
+          <control type="label">
+            <left>0</left>
+            <top>0</top>
+            <width>124</width>
+            <height>60</height>
+            <font>font25_title</font>
+            <textcolor>FF000000</textcolor>
+            <align>center</align>
+            <aligny>center</aligny>
+            <label>Home</label>
+            <visible>Control.HasFocus(210)</visible>
           </control>
         </control>
         <control type="group" id="216">
@@ -6267,9 +6291,9 @@
             <top>0</top>
             <width>148</width>
             <height>60</height>
-            <label>Movies</label>
+            <label/>
             <font>font25_title</font>
-            <textcolor>9EEDEDED</textcolor>
+            <textcolor>FFEDEDED</textcolor>
             <focusedcolor>FF000000</focusedcolor>
             <align>center</align>
             <aligny>center</aligny>
@@ -6286,11 +6310,35 @@
             <width>148</width>
             <height>60</height>
             <font>font25_title</font>
+            <textcolor>9EEDEDED</textcolor>
+            <align>center</align>
+            <aligny>center</aligny>
+            <label>Movies</label>
+            <visible>!String.IsEqual(Window.Property(silo.tab),movies) + !Control.HasFocus(211)</visible>
+          </control>
+          <control type="label">
+            <left>0</left>
+            <top>0</top>
+            <width>148</width>
+            <height>60</height>
+            <font>font25_title</font>
             <textcolor>FFEDEDED</textcolor>
             <align>center</align>
             <aligny>center</aligny>
             <label>Movies</label>
             <visible>String.IsEqual(Window.Property(silo.tab),movies) + !Control.HasFocus(211)</visible>
+          </control>
+          <control type="label">
+            <left>0</left>
+            <top>0</top>
+            <width>148</width>
+            <height>60</height>
+            <font>font25_title</font>
+            <textcolor>FF000000</textcolor>
+            <align>center</align>
+            <aligny>center</aligny>
+            <label>Movies</label>
+            <visible>Control.HasFocus(211)</visible>
           </control>
         </control>
         <control type="group" id="217">
@@ -6311,9 +6359,9 @@
             <top>0</top>
             <width>140</width>
             <height>60</height>
-            <label>Series</label>
+            <label/>
             <font>font25_title</font>
-            <textcolor>9EEDEDED</textcolor>
+            <textcolor>FFEDEDED</textcolor>
             <focusedcolor>FF000000</focusedcolor>
             <align>center</align>
             <aligny>center</aligny>
@@ -6330,11 +6378,35 @@
             <width>140</width>
             <height>60</height>
             <font>font25_title</font>
+            <textcolor>9EEDEDED</textcolor>
+            <align>center</align>
+            <aligny>center</aligny>
+            <label>Series</label>
+            <visible>!String.IsEqual(Window.Property(silo.tab),series) + !Control.HasFocus(212)</visible>
+          </control>
+          <control type="label">
+            <left>0</left>
+            <top>0</top>
+            <width>140</width>
+            <height>60</height>
+            <font>font25_title</font>
             <textcolor>FFEDEDED</textcolor>
             <align>center</align>
             <aligny>center</aligny>
             <label>Series</label>
             <visible>String.IsEqual(Window.Property(silo.tab),series) + !Control.HasFocus(212)</visible>
+          </control>
+          <control type="label">
+            <left>0</left>
+            <top>0</top>
+            <width>140</width>
+            <height>60</height>
+            <font>font25_title</font>
+            <textcolor>FF000000</textcolor>
+            <align>center</align>
+            <aligny>center</aligny>
+            <label>Series</label>
+            <visible>Control.HasFocus(212)</visible>
           </control>
         </control>
         <control type="group" id="206">
@@ -6355,9 +6427,9 @@
             <top>0</top>
             <width>156</width>
             <height>60</height>
-            <label>For You</label>
+            <label/>
             <font>font25_title</font>
-            <textcolor>9EEDEDED</textcolor>
+            <textcolor>FFEDEDED</textcolor>
             <focusedcolor>FF000000</focusedcolor>
             <align>center</align>
             <aligny>center</aligny>
@@ -6374,11 +6446,35 @@
             <width>156</width>
             <height>60</height>
             <font>font25_title</font>
+            <textcolor>9EEDEDED</textcolor>
+            <align>center</align>
+            <aligny>center</aligny>
+            <label>For You</label>
+            <visible>!String.IsEqual(Window.Property(silo.tab),for_you) + !Control.HasFocus(203)</visible>
+          </control>
+          <control type="label">
+            <left>0</left>
+            <top>0</top>
+            <width>156</width>
+            <height>60</height>
+            <font>font25_title</font>
             <textcolor>FFEDEDED</textcolor>
             <align>center</align>
             <aligny>center</aligny>
             <label>For You</label>
             <visible>String.IsEqual(Window.Property(silo.tab),for_you) + !Control.HasFocus(203)</visible>
+          </control>
+          <control type="label">
+            <left>0</left>
+            <top>0</top>
+            <width>156</width>
+            <height>60</height>
+            <font>font25_title</font>
+            <textcolor>FF000000</textcolor>
+            <align>center</align>
+            <aligny>center</aligny>
+            <label>For You</label>
+            <visible>Control.HasFocus(203)</visible>
           </control>
         </control>
         <control type="group" id="207">
@@ -6399,9 +6495,9 @@
             <top>0</top>
             <width>172</width>
             <height>60</height>
-            <label>Calendar</label>
+            <label/>
             <font>font25_title</font>
-            <textcolor>9EEDEDED</textcolor>
+            <textcolor>FFEDEDED</textcolor>
             <focusedcolor>FF000000</focusedcolor>
             <align>center</align>
             <aligny>center</aligny>
@@ -6418,11 +6514,35 @@
             <width>172</width>
             <height>60</height>
             <font>font25_title</font>
+            <textcolor>9EEDEDED</textcolor>
+            <align>center</align>
+            <aligny>center</aligny>
+            <label>Calendar</label>
+            <visible>!String.IsEqual(Window.Property(silo.tab),calendar) + !Control.HasFocus(204)</visible>
+          </control>
+          <control type="label">
+            <left>0</left>
+            <top>0</top>
+            <width>172</width>
+            <height>60</height>
+            <font>font25_title</font>
             <textcolor>FFEDEDED</textcolor>
             <align>center</align>
             <aligny>center</aligny>
             <label>Calendar</label>
             <visible>String.IsEqual(Window.Property(silo.tab),calendar) + !Control.HasFocus(204)</visible>
+          </control>
+          <control type="label">
+            <left>0</left>
+            <top>0</top>
+            <width>172</width>
+            <height>60</height>
+            <font>font25_title</font>
+            <textcolor>FF000000</textcolor>
+            <align>center</align>
+            <aligny>center</aligny>
+            <label>Calendar</label>
+            <visible>Control.HasFocus(204)</visible>
           </control>
         </control>
         <control type="group" id="208">
@@ -6443,9 +6563,9 @@
             <top>0</top>
             <width>172</width>
             <height>60</height>
-            <label>Requests</label>
+            <label/>
             <font>font25_title</font>
-            <textcolor>9EEDEDED</textcolor>
+            <textcolor>FFEDEDED</textcolor>
             <focusedcolor>FF000000</focusedcolor>
             <align>center</align>
             <aligny>center</aligny>
@@ -6462,13 +6582,48 @@
             <width>172</width>
             <height>60</height>
             <font>font25_title</font>
+            <textcolor>9EEDEDED</textcolor>
+            <align>center</align>
+            <aligny>center</aligny>
+            <label>Requests</label>
+            <visible>!String.IsEqual(Window.Property(silo.tab),requests) + !Control.HasFocus(205)</visible>
+          </control>
+          <control type="label">
+            <left>0</left>
+            <top>0</top>
+            <width>172</width>
+            <height>60</height>
+            <font>font25_title</font>
             <textcolor>FFEDEDED</textcolor>
             <align>center</align>
             <aligny>center</aligny>
             <label>Requests</label>
             <visible>String.IsEqual(Window.Property(silo.tab),requests) + !Control.HasFocus(205)</visible>
           </control>
+          <control type="label">
+            <left>0</left>
+            <top>0</top>
+            <width>172</width>
+            <height>60</height>
+            <font>font25_title</font>
+            <textcolor>FF000000</textcolor>
+            <align>center</align>
+            <aligny>center</aligny>
+            <label>Requests</label>
+            <visible>Control.HasFocus(205)</visible>
+          </control>
         </control>
+      </control>
+      <control type="label">
+        <left>1560</left>
+        <top>0</top>
+        <width>200</width>
+        <height>64</height>
+        <font>font25_title</font>
+        <textcolor>BFEDEDED</textcolor>
+        <align>right</align>
+        <aligny>center</aligny>
+        <label>$INFO[System.Time]</label>
       </control>
       <control type="group">
         <left>1776</left>
@@ -6494,11 +6649,20 @@
           <onright>230</onright>
         </control>
         <control type="image">
+          <left>-6</left>
+          <top>-6</top>
+          <width>68</width>
+          <height>68</height>
+          <texture colordiffuse="FFEDEDED">circle.png</texture>
+          <visible>Control.HasFocus(230)</visible>
+        </control>
+        <control type="image">
           <left>0</left>
           <top>0</top>
           <width>56</width>
           <height>56</height>
           <texture colordiffuse="2EFFFFFF">circle.png</texture>
+          <visible>!Control.HasFocus(230)</visible>
         </control>
         <control type="label">
           <left>0</left>
@@ -6510,6 +6674,19 @@
           <align>center</align>
           <aligny>center</aligny>
           <label>$INFO[Window.Property(silo.initials)]</label>
+          <visible>!Control.HasFocus(230)</visible>
+        </control>
+        <control type="label">
+          <left>0</left>
+          <top>0</top>
+          <width>56</width>
+          <height>56</height>
+          <font>font25_title</font>
+          <textcolor>FF000000</textcolor>
+          <align>center</align>
+          <aligny>center</aligny>
+          <label>$INFO[Window.Property(silo.initials)]</label>
+          <visible>Control.HasFocus(230)</visible>
         </control>
         <control type="image">
           <left>0</left>
@@ -6518,14 +6695,6 @@
           <height>56</height>
           <aspectratio>scale</aspectratio>
           <texture diffuse="mask_circle.png" background="true">$INFO[Window.Property(silo.avatar)]</texture>
-        </control>
-        <control type="image">
-          <left>-4</left>
-          <top>-4</top>
-          <width>64</width>
-          <height>64</height>
-          <texture colordiffuse="FFEDEDED">ring_circle.png</texture>
-          <visible>Control.HasFocus(230)</visible>
         </control>
       </control>
     </control>

@@ -10,6 +10,7 @@ The default transport uses urllib, TLS verification, a timeout and no redirects.
 import copy
 import json
 import math
+import re
 import threading
 import time
 import uuid
@@ -214,9 +215,15 @@ class SiloClient:
                     headers["X-Profile-Token"] = profile_token
         return headers
 
-    # Endpoints whose artwork honours image_size and the per-slot widths.
-    ARTWORK_PATHS = ("/catalog/items/", "/catalog/series/", "/home/", "/library/", "/watchlist",
-                     "/favorites", "/history", "/shuffles", "/watch/")
+    # GET endpoints whose contract declares image_size. Silo rejects any undeclared query
+    # parameter ("The request did not pass validation"), so nothing else gets them.
+    ARTWORK_PATHS = re.compile(
+        r"^/(catalog|catalog/audiobook-groups"
+        r"|catalog/items/[^/]+(/(episodes|manga-files|versions))?"
+        r"|catalog/series/[^/]+/seasons(/[^/]+(/episodes)?)?"
+        r"|home/(layout|sections)|home/sections/[^/]+/items"
+        r"|library/[^/]+/sections(/[^/]+/items)?"
+        r"|watchlist|favorites|history|(?!shuffles/capabilities$)shuffles/[^/]+|watch/[^/]+)$")
 
     def configure_artwork(self, params):
         """Ask for artwork at the size this device draws it (see Application.configure_artwork)."""
@@ -225,7 +232,7 @@ class SiloClient:
     def _with_artwork(self, method, path, params):
         extra = getattr(self, "artwork_params", None)
         path = str(path).split("?", 1)[0]
-        if method != "GET" or not extra or not (path == "/catalog" or path.startswith(self.ARTWORK_PATHS)):
+        if method != "GET" or not extra or not self.ARTWORK_PATHS.match(path):
             return params
         merged = dict(extra)
         merged.update(params or {})

@@ -5320,6 +5320,17 @@
         <aligny>center</aligny>
         <label>$INFO[Window.Property(silo.title)]</label>
       </control>
+      <control type="label">
+        <left>1560</left>
+        <top>0</top>
+        <width>272</width>
+        <height>64</height>
+        <font>font25_title</font>
+        <textcolor>BFEDEDED</textcolor>
+        <align>right</align>
+        <aligny>center</aligny>
+        <label>$INFO[System.Time]</label>
+      </control>
     </control>
   </controls>
 </window>

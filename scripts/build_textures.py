@@ -203,6 +203,16 @@ def draw_subtitles(draw, s):
         _stroke(draw, [(s * x0, s * y), (s * x1, s * y)], w)
 
 
+def draw_audio(draw, s):
+    """A speaker with two sound waves."""
+    w = int(s * 0.075)
+    draw.polygon([(s * 0.14, s * 0.38), (s * 0.30, s * 0.38), (s * 0.50, s * 0.20), (s * 0.50, s * 0.80),
+                  (s * 0.30, s * 0.62), (s * 0.14, s * 0.62)], fill=OPAQUE)
+    for radius in (0.16, 0.30):
+        box = [s * (0.60 - radius), s * (0.50 - radius), s * (0.60 + radius), s * (0.50 + radius)]
+        draw.arc(box, -50, 50, fill=OPAQUE, width=w)
+
+
 def draw_chevron_down(draw, s):
     _stroke(draw, [(s * 0.26, s * 0.38), (s * 0.50, s * 0.62), (s * 0.74, s * 0.38)], int(s * 0.09))
 
@@ -331,6 +341,7 @@ def textures():
         "icon_resume.png": icon(draw_resume),
         "icon_versions.png": icon(draw_versions),
         "icon_subtitles.png": icon(draw_subtitles),
+        "icon_audio.png": icon(draw_audio),
         "icon_chevron_down.png": icon(draw_chevron_down),
         "icon_plus.png": icon(draw_plus),
         "icon_bookmark.png": icon(draw_bookmark),

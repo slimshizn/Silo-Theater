@@ -227,6 +227,13 @@ class ApplicationTrackTests(unittest.TestCase):
         self.assertEqual(self.app.subtitle_default(self.episode, VERSION), (0, "remembered"))
         self.assertEqual(self.app.audio_default(self.episode, VERSION), (0, "ja"))
 
+    def test_an_audio_pick_on_the_details_screen_is_requested(self):
+        options = self.app._track_options({}, self.episode, VERSION, application_module.AUTO, audio_index=2)
+        self.assertEqual(options["audio_track_index"], 2)
+        # A pick that is no longer a track of this file falls back to the usual choice.
+        options = self.app._track_options({}, self.episode, VERSION, application_module.AUTO, audio_index=9)
+        self.assertEqual(options["audio_track_index"], self.app.audio_default(self.episode, VERSION)[0])
+
     def test_play_requests_the_resolved_audio_and_subtitle(self):
         item = movie_item(0)
         item["versions"][0].update(VERSION, file_id="file-a")

@@ -9,10 +9,10 @@ Founders Theater is a community project. It is not an official Silo app and is n
 - Sign in with an activation code or username and password, or create an account when your server allows it.
 - Choose household profiles, including PIN-protected ones, and manage profiles (names, avatars, PINs, kid limits).
 - Home rows in your server's order, with a hero that follows the title you focus; reorder or hide rows; remove titles from Continue Watching.
-- Movies and Series grids with library, sort, filters (genre, decade, watch status, rating, resolution, HDR, studio, network, country), an A–Z jump and Shuffle; each library's Recommended rows and Collections.
+- Movies and Series grids with library, sort (in either direction), filters (genre, decade, watch status, rating, resolution, HDR, studio, network, country), an A–Z jump and Shuffle; each library's Recommended rows and Collections.
 - For You, Calendar and, when your server offers it, Requests (search, request, Notify me).
 - Search with people; person pages with filmography.
-- Title details with seasons, an episode rail, cast, trailers and extras, related titles and a facts table; Watchlist, Favorite, Mark watched, Go to series and Shuffle.
+- Title details with seasons, an episode rail, cast, trailers and extras, related titles and a facts table; the full synopsis, audio and subtitle choice before playing; Watchlist, Favorite, Mark watched, Go to series and Shuffle.
 - Watchlist, Favorites and History screens.
 - Plays original files directly, and titles your device cannot play as converted HLS streams from your server; choose the quality during playback.
 - Skip Intro, Skip Recap and Skip Credits from your server's markers, with your profile's auto-skip settings.
@@ -49,11 +49,11 @@ make build
 make repository
 ```
 
-`make build` creates `dist/script.silo-0.7.7.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
+`make build` creates `dist/script.silo-0.8.0.zip` for direct installation through Kodi's **Install from zip file** menu. `make repository` creates the static Kodi repository and installer under `dist/pages/`.
 
 ## Playback compatibility
 
-Version **0.7.7** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** under **Settings → This device → More device settings…** to limit converted streams. On Automatic quality, **Lower quality when buffering** (Settings → Playback) asks your server for a lower quality when playback keeps buffering, as the Silo apps do; choose Ask first or Never to change that. **Settings → Account → Test connection speed** measures your connection to Silo and can clear a limit Silo learned after buffering.
+Version **0.8.0** plays original files directly when your device supports them and asks your Silo server to convert the rest (remux or transcode to HLS). Set **Maximum bitrate for converted video** under **Settings → This device → More device settings…** to limit converted streams. On Automatic quality, **Lower quality when buffering** (Settings → Playback) asks your server for a lower quality when playback keeps buffering, as the Silo apps do; choose Ask first or Never to change that. **Settings → Account → Test connection speed** measures your connection to Silo and can clear a limit Silo learned after buffering.
 
 ### Theme music
 

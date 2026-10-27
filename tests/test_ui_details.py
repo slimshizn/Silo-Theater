@@ -164,7 +164,7 @@ class DetailsWindowTests(unittest.TestCase):
         self.assertIn("Example.HD.mkv", window.properties["silo.file_label"])
         self.assertIn("1080p", window.properties["silo.file_label"])
         self.assertTrue(window.hint(103).startswith("Version: 1080p"))
-        self.assertEqual(window.properties["silo.badge.0"], "HD")
+        self.assertEqual(window.properties["silo.badge.0"], "FHD")
         self.app.play.return_value = "file-b"
         window.onClick(101)
         self.app.play.assert_called_once_with(refreshed, resume=True, file_id="file-b", subtitle_index=None)
@@ -444,6 +444,60 @@ class DetailsWindowTests(unittest.TestCase):
         window.onAction(Action(UP))
         # Up returns to the button that was focused last, and the page scrolls back.
         self.assertEqual((window.focus, window.scroll_offset), (104, 0))
+
+    def test_audio_button_picks_a_track_saves_it_and_plays_with_it(self):
+        item = movie_item(position=0)
+        item["versions"][0]["audio_tracks"] = [{"language": "eng", "codec": "ac3", "channels": 6},
+                                               {"language": "jpn", "codec": "aac", "channels": 2}]
+        self.app.audio_default.return_value = (0, "en")
+        window = self.window(item)
+        window.onInit()
+        self.assertIn(ui_details.AUDIO, window.focusable_buttons)
+        self.assertEqual(window.properties["silo.has_audio_choice"], "true")
+        self.assertEqual(window.hint(ui_details.AUDIO), "Audio: ENG · AC3 · 5.1 (Auto)")
+        # Untouched, Play leaves audio to the usual preferences.
+        self.app.play.return_value = None
+        window.onClick(ui_details.PLAY)
+        self.assertNotIn("audio_index", self.app.play.call_args.kwargs)
+        self.app.dialog.select.return_value = 1
+        window.onClick(ui_details.AUDIO)
+        self.assertEqual(self.app.dialog.select.call_args.args, ("Audio", ["ENG · AC3 · 5.1", "JPN · AAC · Stereo"]))
+        self.assertEqual(self.app.dialog.select.call_args.kwargs, {"preselect": 0})
+        self.assertEqual(self.app.remember_audio.call_args.args[2], 1)
+        self.assertEqual(window.hint(ui_details.AUDIO), "Audio: JPN · AAC · Stereo")
+        window.onClick(ui_details.PLAY)
+        self.assertEqual(self.app.play.call_args.kwargs["audio_index"], 1)
+
+        single = movie_item(position=0)
+        single["versions"][0]["audio_tracks"] = [{"language": "eng", "codec": "ac3", "channels": 6}]
+        window = self.window(single)
+        window.onInit()
+        self.assertNotIn(ui_details.AUDIO, window.focusable_buttons)
+        self.assertEqual(window.properties["silo.has_audio_choice"], "")
+
+    def test_long_synopsis_offers_read_more_above_the_buttons(self):
+        movie = movie_item()
+        movie["overview"] = "A long story that keeps going. " * 12
+        window = self.window(movie)
+        window.onInit()
+        self.assertEqual(window.properties["silo.plot_more"], "true")
+        self.assertEqual(window.available_zones(), ["synopsis", "buttons"])
+        self.assertEqual(window.focus, ui_details.PLAY)  # Opening still focuses Play.
+        window.onAction(Action(UP))
+        self.assertEqual(window.focus, ui_details.READ_MORE)
+        window.onClick(ui_details.READ_MORE)
+        self.assertEqual(self.app.dialog.textviewer.call_args.args, ("Example", movie["overview"].strip()))
+        window.onAction(Action(DOWN))
+        self.assertEqual(window.focus, ui_details.PLAY)
+
+        short = movie_item()
+        short["overview"] = "A short story."
+        window = self.window(short)
+        window.onInit()
+        self.assertEqual(window.properties["silo.plot_more"], "")
+        self.assertEqual(window.available_zones(), ["buttons"])
+        window.onAction(Action(UP))
+        self.assertEqual(window.focus, ui_details.PLAY)
 
     def test_similar_failures_leave_the_section_hidden(self):
         for failure in (ValueError("offline"), None):
@@ -838,6 +892,19 @@ class DetailsSkinTests(unittest.TestCase):
         finally:
             sys.path.pop(0)
         self.assertEqual(SKIN.read_text(encoding="utf-8"), generator.build())
+
+    def test_capsule_text_never_scrolls_inside_its_button(self):
+        # A Kodi button pads its label by textoffsetx on both sides, which left "Play" 22 px.
+        for control_id, prop in ((ui_details.PLAY, "silo.play_label"), (ui_details.NEXT_UP, "silo.continue_label")):
+            self.assertEqual(self.controls[control_id].findtext("label") or "", "", control_id)
+            captions = [node for node in self.controls[1300 + control_id].iter("control")
+                        if node.get("type") == "label" and prop in (node.findtext("label") or "")]
+            self.assertEqual(len(captions), 3, control_id)  # Idle, focused and disabled colours.
+            for caption in captions:
+                self.assertEqual(caption.findtext("left"), "74")
+                self.assertNotEqual(caption.findtext("scroll"), "true")
+        for text in ("Play", "Resume 1:15", "Resume 1:06:40", "Resume S12:E24"):
+            self.assertGreaterEqual(ui_details.capsule_width(text) - 74, 15 * len(text), text)
 
     def test_ids_are_unique_and_cover_the_controller(self):
         ids = [int(node.attrib["id"]) for node in self.tree.iter("control") if "id" in node.attrib]

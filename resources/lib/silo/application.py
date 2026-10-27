@@ -726,13 +726,15 @@ class Application:
                 detail["user_data"] = progress
         self._after_playback_item = (self._playback_item_key(item, file_id), detail)
 
-    def play(self, item, resume=None, file_id=None, subtitle_index=AUTO, start_at=None, auto_next=True):
+    def play(self, item, resume=None, file_id=None, subtitle_index=AUTO, start_at=None, auto_next=True,
+             audio_index=AUTO):
         """Generic Play follows preferences; explicit Resume/Start keeps its intent.
 
         Return the chosen file so the detail screen can retain it after refresh.
         Resume positions are source seconds, exactly as the catalog reports them.
         ``subtitle_index`` is a playback subtitle ordinal, None for Off, or AUTO
         to use the remembered choice or the profile's subtitle preferences.
+        ``audio_index`` is an audio ordinal picked on the details screen, or AUTO.
         """
         if not self.is_playable(item):
             return None
@@ -760,7 +762,7 @@ class Application:
         selected_item = self.refresh_item(item, file_id)
         position = self.resume_seconds(selected_item)
         selected_version = default_version(selected_item, preferred_file_id=file_id)
-        options = self._track_options(options, selected_item, selected_version, subtitle_index)
+        options = self._track_options(options, selected_item, selected_version, subtitle_index, audio_index)
         multipart = is_multipart(selected_version)
         if resume is None and multipart:
             # Silo intentionally avoids applying an item-global offset to a part.
@@ -961,10 +963,14 @@ class Application:
             self._store_choice(item, {"kind": "track", "language": language, "forced": False, "hi": False,
                                       "external": False})
 
-    def _track_options(self, options, item, version, subtitle_index):
-        """Audio (remembered, else the profile's language) and the subtitle to request (see track_prefs)."""
+    def _track_options(self, options, item, version, subtitle_index, audio_index=AUTO):
+        """Audio (picked, else remembered, else the profile's language) and the subtitle to request."""
         options = dict(options)
-        audio, _language = self.audio_default(item, version)
+        tracks = (version or {}).get("audio_tracks") or []
+        if isinstance(audio_index, int) and not isinstance(audio_index, bool) and 0 <= audio_index < len(tracks):
+            audio = audio_index
+        else:
+            audio, _language = self.audio_default(item, version)
         if audio is not None:
             options["audio_track_index"] = audio
         if subtitle_index is AUTO:

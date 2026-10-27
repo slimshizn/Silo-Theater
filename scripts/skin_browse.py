@@ -185,6 +185,7 @@ def top_bar():
         image(860, 2, 200, 60, "pill60_selected.png", border=30, control_id=102, condition=has("silo.title")),
         label(560, 2, 800, 60, "$INFO[{}]".format(prop("silo.title")), "font25_title", TEXT, "center",
               control_id=103),
+        label(1560, 0, 272, 64, "$INFO[System.Time]", "font25_title", SECONDARY, "right"),
     ])
 
 

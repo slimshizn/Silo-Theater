@@ -186,6 +186,7 @@ def hub():
             image(88, 12, 40, 40, "brand_icon.png", aspect="keep"),
             label(142, 0, 346, 64, "[COLOR FFE8CF8F]FOUNDERS[/COLOR] THEATER", "font25_title", "FFFFFFFF"),
             label(480, 0, 400, 64, "Requests", "font36_title", MUTED),
+            label(1560, 0, 272, 64, "$INFO[System.Time]", "font25_title", SECONDARY, "right"),
         ]),
     ] + search + [preview] + [row_slot(index) for index in range(SLOTS)] + [
         label(88, 620, 1744, 60, "$INFO[Window.Property(silo.empty)]", "font27", MUTED, "center", control_id=150),
