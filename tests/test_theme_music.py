@@ -420,3 +420,17 @@ class SmoothThemeTests(unittest.TestCase):
                 theme.pop()
         files = [name for name in os.listdir(self.cache) if name.endswith(".theme")]
         self.assertLessEqual(len(files), 2)
+
+
+class KodiVolumeTests(unittest.TestCase):
+    def test_setting_the_volume_never_shows_kodis_volume_bar(self):
+        from silo.theme_music import KodiVolume
+        calls = []
+        xbmc = SimpleNamespace(executebuiltin=calls.append,
+                               executeJSONRPC=lambda request: '{"result": {"volume": 72, "muted": false}}')
+        with patch.dict(sys.modules, {"xbmc": xbmc}):
+            volume = KodiVolume()
+            self.assertEqual(volume.get(), (72, False))
+            volume.set(12.4)
+            volume.set(140)
+        self.assertEqual(calls, ["SetVolume(12)", "SetVolume(100)"])  # No ",showvolumebar".

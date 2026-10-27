@@ -145,9 +145,10 @@ class KodiVolume:
             return None
 
     def set(self, volume):
+        # The SetVolume builtin, unlike JSON-RPC's Application.SetVolume, does not show
+        # Kodi's volume bar unless asked to.
         import xbmc
-        xbmc.executeJSONRPC(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "Application.SetVolume",
-                                        "params": {"volume": max(0, min(100, int(round(volume))))}}))
+        xbmc.executebuiltin("SetVolume({})".format(max(0, min(100, int(round(volume))))))
 
 
 def _spawn(function):
