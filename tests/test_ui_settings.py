@@ -176,6 +176,14 @@ class LayoutTests(unittest.TestCase):
         for index in range(5, ui_settings.SLOTS):
             window.getControl(ui_settings.slot_ids(index)[0]).setVisible.assert_called_with(False)
 
+    def test_focus_before_init_is_ignored(self):
+        window = ui_settings.SettingsWindow("SiloSettings.xml", str(ROOT), "Default", "1080i")
+        window.application = make_application()
+        window.onFocus(ui_settings.RAIL_BUTTONS[0])  # Kodi focuses the default control first.
+        window.onFocus(button(0))
+        window.onInit()
+        self.assertEqual(window.properties["silo.category"], "0")
+
     def test_moving_on_the_rail_swaps_the_rows(self):
         window = open_window()
         select_category(window, AUDIO)

@@ -19,6 +19,8 @@ from .storage import StorageError
 LEFT_FULLSCREEN_SECONDS = 1.0
 # How long Kodi has to reach a saved position; converted streams start converting there on demand.
 RESUME_TIMEOUT, RESUME_TIMEOUT_CONVERTED = 10, 30
+# How long after play() a stop or end may still be the previous item's (see Player).
+OPENING_QUIET_SECONDS = 5.0
 
 
 def player_near(player, target):
@@ -194,7 +196,7 @@ def _bandwidth_cap(options):
 class PlaybackSession:
     """Synchronous session core, independent of Kodi and exercised offline."""
 
-    def __init__(self, client, mode="auto", version="0.7.5", options=None):
+    def __init__(self, client, mode="auto", version="0.7.6", options=None):
         self.client, self.mode, self.version = client, mode, version
         self.options = dict(options or {})
         # /api/v2 calls this installation_id, but it identifies the SERVER.
@@ -901,11 +903,20 @@ class PlaybackController:
             # it starts, the old item's stop/end callbacks are not the viewer's.
             switching = False
             quiet_until = 0.0
+            # Kodi reports the end of whatever played before ours (a theme song,
+            # the viewer's music) late; until our item announces itself, a stop
+            # or end is that item's, not the viewer stopping ours.
+            opening_until = 0.0
 
             def _stale(self):
-                return self.switching or time.monotonic() < self.quiet_until
+                now = time.monotonic()
+                return self.switching or now < self.quiet_until or now < self.opening_until
+
+            def onPlayBackStarted(self):
+                self.opening_until = 0.0
 
             def onAVStarted(self):
+                self.opening_until = 0.0
                 if self.switching:
                     self.switching = False
                     self.quiet_until = time.monotonic() + 3
@@ -1053,6 +1064,7 @@ class PlaybackController:
             stage = "opening"
             player.started = player.failed = player.ended = player.finished = False
             player.switching = switching
+            player.opening_until = time.monotonic() + OPENING_QUIET_SECONDS
             player.play(path, listitem)
             opened = True
             limit = 60 if converted else 30

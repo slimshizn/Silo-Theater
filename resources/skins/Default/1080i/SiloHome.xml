@@ -6146,7 +6146,7 @@
       <top>56</top>
       <width>1920</width>
       <height>64</height>
-      <animation effect="fade" start="100" end="70" time="200" condition="!(ControlGroup(200).HasFocus() | ControlGroup(600).HasFocus())">Conditional</animation>
+      <animation effect="fade" start="100" end="70" time="200" condition="!ControlGroup(200).HasFocus() + !ControlGroup(600).HasFocus()">Conditional</animation>
       <control type="image">
         <left>88</left>
         <top>12</top>

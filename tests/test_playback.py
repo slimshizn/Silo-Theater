@@ -621,6 +621,13 @@ class KodiHarness(unittest.TestCase):
                     test.fail_opens -= 1
                     self.onPlayBackError()
                     return
+                if getattr(test, "late_previous_stop", False):
+                    # Kodi delivers the theme song's stop after Silo's play() call.
+                    self.onPlayBackStopped()
+                self.onPlayBackStarted()
+                if getattr(test, "stop_while_opening", False):
+                    self.onPlayBackStopped()
+                    return
                 self.playing = True
                 self.onAVStarted()
 
@@ -779,6 +786,22 @@ class ControllerTests(KodiHarness):
                                 start=0, options={"progress_interval": 10, "subtitle_mode": "server",
                                                   "stop_on_back": False})
         self.assertFalse(any("left_fullscreen_stop" in line for line in state.logs))
+
+    def test_previous_items_late_stop_does_not_end_a_new_playback(self):
+        self.late_previous_stop = True
+        client = FakeClient()
+        state = self.run_player(client, [(1 + index * 0.25, None) for index in range(12)] + [(4.5, "stop")],
+                                start=0)
+        self.assertTrue(any("av_started" in line for line in state.logs))
+        self.assertTrue(state.result["has_sample"])
+        self.assertEqual(client.calls[-1][0], "DELETE")
+
+    def test_stop_after_kodi_announces_the_item_still_counts(self):
+        self.stop_while_opening = True
+        state = self.run_player(FakeClient(), [], start=0)
+        self.assertFalse(any("av_started" in line for line in state.logs))
+        self.assertLess(state.now, 5)  # Never waits out the open deadline.
+        self.assertEqual(state.dialogs, [])
 
     def test_never_fullscreen_never_stops(self):
         self.conditions = FullscreenFor(0)

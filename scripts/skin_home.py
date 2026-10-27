@@ -180,9 +180,9 @@ def card_list(list_id, kind, left, top, width, height, item_width, item_height, 
 # ---------------------------------------------------------------- screen parts
 
 def top_bar():
-    bar_focus = "ControlGroup(200).HasFocus() | ControlGroup(600).HasFocus()"
-    dim = ('<animation effect="fade" start="100" end="70" time="200" condition="!({})">Conditional</animation>'
-           .format(bar_focus))
+    # Dim unless the bar has focus. Kodi will not parse "!(A | B)" here, so this is "!A + !B".
+    dim = ('<animation effect="fade" start="100" end="70" time="200" '
+           'condition="!ControlGroup(200).HasFocus() + !ControlGroup(600).HasFocus()">Conditional</animation>')
     search = [button(201, 0, 4, 56, 56, "", focus="circle.png", focus_border=None, navigation=nav(201, right=210)),
               image(14, 18, 28, 28, "icon_search.png", color="9EFFFFFF", condition="!Control.HasFocus(201)"),
               image(14, 18, 28, 28, "icon_search.png", color=BLACK, condition="Control.HasFocus(201)")]

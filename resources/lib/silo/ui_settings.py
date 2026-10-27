@@ -194,6 +194,9 @@ class SettingsWindow(xbmcgui.WindowXML):
             return 0
 
     def rows(self):
+        # Kodi can report focus before onInit has built the categories.
+        if self.category >= len(self.categories):
+            return []
         return self.categories[self.category][1]
 
     # ------------------------------------------------------------ values
