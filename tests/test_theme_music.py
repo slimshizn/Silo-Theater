@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import sys
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -17,22 +18,33 @@ def item(content_id, theme_id="t1", owner=None):
 
 
 class FakePlayer:
+    """Kodi's player: one file at a time; ``other`` is something the viewer plays."""
+
     def __init__(self):
-        self.audio, self.other, self.played, self.stops = False, False, [], 0
+        self.file, self.other, self.played, self.stops = None, None, [], 0
+
+    @property
+    def audio(self):
+        return self.file is not None
 
     def isPlaying(self):
-        return self.audio or self.other
+        return self.file is not None or self.other is not None
 
     def isPlayingAudio(self):
-        return self.audio
+        return self.isPlaying()
 
-    def play(self, url, listitem=None):
+    def getPlayingFile(self):
+        return self.other if self.other is not None else (self.file or "")
+
+    def play(self, url, listitem=None, windowed=False):
+        if not windowed:
+            raise AssertionError("A theme must play windowed, or Kodi opens its fullscreen music player")
         self.played.append(url)
-        self.audio = True
+        self.file, self.other = url, None
 
     def stop(self):
         self.stops += 1
-        self.audio = False
+        self.file = self.other = None
 
 
 class FakeRelay:
@@ -102,7 +114,7 @@ class ThemeMusicTests(unittest.TestCase):
         self.client.capability = "disabled"
         self.music().push(item("movie:1"))
         self.client.capability = "available"
-        self.player.other = True
+        self.player.other = "/music/viewer-song.flac"
         self.music().push(item("movie:1"))
         self.assertEqual(self.player.played, [])
 
@@ -235,3 +247,64 @@ class OnlineTvThemeTests(unittest.TestCase):
         self.settings["ui.theme_music_enabled"] = False
         self.music().push(self.series())
         self.assertEqual((self.checked, self.player.played), ([], []))
+
+
+class StopTests(ThemeMusicTests):
+    """The theme stops for anything else that plays, and never loops over it."""
+
+    def test_playback_stops_the_theme_and_waits_for_it(self):
+        theme = self.music()
+        theme.push(item("movie:1"))
+        theme.suspend()  # application.play does this before Silo's player starts.
+        self.assertEqual((self.player.stops, self.player.file), (1, None))
+
+    def test_a_trailer_stops_the_theme_until_the_next_page(self):
+        theme = self.music()
+        theme.push(item("movie:1"))
+        theme.yield_to()
+        self.player.other = "plugin://plugin.video.youtube/play/?video_id=x"
+        self.assertEqual(self.player.stops, 1)
+        theme.push(item("movie:2", theme_id="t2"))  # The trailer still plays: never start over it.
+        self.assertEqual(len(self.player.played), 1)
+        self.player.other = None
+        theme.pop()
+        self.assertEqual(len(self.player.played), 2)
+
+    def test_the_viewers_own_playback_is_never_stopped(self):
+        theme = self.music()
+        self.player.other = "/music/viewer-song.flac"
+        theme.push(item("movie:1"))
+        theme.suspend()
+        theme.close()
+        self.assertEqual((self.player.stops, self.player.other), (0, "/music/viewer-song.flac"))
+
+    def test_the_loop_never_restarts_over_other_playback(self):
+        import silo.theme_music as module
+        self.settings["ui.theme_music_loop"] = True
+        theme = ThemeMusic(self.client, self.settings.get, player=self.player, relay_factory=FakeRelay)
+        self.addCleanup(theme.close)
+        with patch.object(module, "WATCH_SECONDS", 0.01):
+            theme.push(item("movie:1"))
+            for _ in range(50):  # Let the watcher see the theme playing.
+                time.sleep(0.005)
+            self.player.other = "https://silo.invalid/video.mkv"  # A video replaced the theme.
+            for _ in range(50):
+                time.sleep(0.005)
+        self.assertEqual(len(self.player.played), 1)
+        self.assertIsNone(theme.playing)
+
+    def test_the_loop_restarts_the_theme_when_nothing_else_plays(self):
+        import silo.theme_music as module
+        self.settings["ui.theme_music_loop"] = True
+        theme = ThemeMusic(self.client, self.settings.get, player=self.player, relay_factory=FakeRelay)
+        self.addCleanup(theme.close)
+        with patch.object(module, "WATCH_SECONDS", 0.01):
+            theme.push(item("movie:1"))
+            for _ in range(50):
+                time.sleep(0.005)
+            self.player.file = None  # The theme reached its end.
+            for _ in range(100):
+                time.sleep(0.005)
+                if len(self.player.played) > 1:
+                    break
+        self.assertEqual(len(self.player.played), 2)

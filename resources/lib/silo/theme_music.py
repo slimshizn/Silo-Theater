@@ -102,6 +102,8 @@ class ThemeMusic:
         self.monitor = monitor
         self.stack = []
         self.playing = None  # Key of the theme currently started by us
+        self.url = None  # The exact file Kodi was given for it: how we recognize our own theme
+        self.yielded = False  # Something else plays (a trailer): stay quiet until the next page
         self.suspended = False
         self.capability = None
         self.relay = None
@@ -116,13 +118,22 @@ class ThemeMusic:
     @_quiet
     def push(self, item):
         self.stack.append(item)
+        self.yielded = False
         self._sync()
 
     @_quiet
     def pop(self):
         if self.stack:
             self.stack.pop()
+        self.yielded = False
         self._sync()
+
+    @_quiet
+    def yield_to(self):
+        """Other playback starts outside Silo's player (a YouTube trailer): stop the theme
+        and keep quiet until the viewer moves to another page."""
+        self.yielded = True
+        self._stop()
 
     @_quiet
     def suspend(self):
@@ -180,7 +191,7 @@ class ThemeMusic:
 
     def _sync(self):
         """Make what plays match the top page."""
-        wanted = self._wanted(self.stack[-1]) if self.stack and not self.suspended else None
+        wanted = self._wanted(self.stack[-1]) if self.stack and not (self.suspended or self.yielded) else None
         if wanted is None:
             self._stop()
             return
@@ -205,9 +216,10 @@ class ThemeMusic:
         except AttributeError:
             pass
         with self._lock:
-            self.playing = key
+            self.playing, self.url = key, url
         self.loop = self.setting(LOOP) is True  # Read here, never from the watcher thread.
-        self.player().play(url, listitem)
+        # Windowed: background audio. Without it Kodi switches to its fullscreen music player.
+        self.player().play(url, listitem, True)
         self._watch(key, title, make_url)
 
     def _grant(self, owner, theme):
@@ -295,16 +307,28 @@ class ThemeMusic:
 
     # -------------------------------------------------------------- state
     def _ours_playing(self):
+        """Only the exact file we started counts: never the viewer's own music or video."""
+        url = self.url
+        if not url:
+            return False
         try:
-            return self.player().isPlayingAudio()
+            player = self.player()
+            return bool(player.isPlaying()) and player.getPlayingFile() == url
+        except RuntimeError:
+            return False
+
+    def _other_playing(self):
+        try:
+            player = self.player()
+            return bool(player.isPlaying()) and player.getPlayingFile() != self.url
         except RuntimeError:
             return False
 
     def _stop(self):
         self._stop_watch.set()
         with self._lock:
-            was_playing, self.playing = self.playing, None
-        if was_playing and self._ours_playing():
+            self.playing = None
+        if self._ours_playing():
             try:
                 self.player().stop()
             except RuntimeError:
@@ -335,6 +359,13 @@ class ThemeMusic:
                     current = self.playing
                 if current != key or stop.is_set():
                     return
+                if self._other_playing():
+                    # Something else replaced the theme (a video, a trailer, music): never
+                    # loop over it. The theme comes back with the next page.
+                    with self._lock:
+                        if self.playing == key:
+                            self.playing = None
+                    return
                 if not self.loop:
                     with self._lock:
                         self.playing = None
@@ -343,9 +374,10 @@ class ThemeMusic:
                     url = make_url()
                     import xbmcgui
                     with self._lock:  # suspend() between the check and play() must win.
-                        if not url or stop.is_set() or self.playing != key:
+                        if not url or stop.is_set() or self.playing != key or self._other_playing():
                             return
-                        self.player().play(url, xbmcgui.ListItem(label=title, path=url))
+                        self.url = url
+                        self.player().play(url, xbmcgui.ListItem(label=title, path=url), True)
                 except Exception:
                     self.failures += 1
                     return

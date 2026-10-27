@@ -849,6 +849,10 @@ class DetailsWindow(xbmcgui.WindowXML):
     def play_extra(self, entry):
         if entry["source"] == "youtube":
             # Trailers hand off to Kodi's YouTube add-on; the row hides them without it.
+            # They do not go through Silo's player, so stop the theme here first.
+            theme = getattr(self.application, "_theme", None)
+            if theme is not None:
+                theme.yield_to()
             xbmc.Player().play(YOUTUBE_PLAY.format(quote(entry["key"], safe="")))
             return
         # A local extra is a catalog item of type "extra" with its own versions.
