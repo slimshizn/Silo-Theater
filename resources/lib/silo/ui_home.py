@@ -1215,8 +1215,23 @@ class HomeWindow(xbmcgui.WindowXML):
             self.close_pill()
         elif self.tab != "home":
             self.show_home()
+        elif self.row_of(self.focus_id()) is not None:
+            # Back from the rows comes up to the Home tab first.
+            self.focus_tab()
+        elif self.application.options().get("confirm_exit", True):
+            self.confirm_exit()
         else:
             self.result = None
+            self.close()
+
+    def confirm_exit(self):
+        """Ask before leaving; focus starts on Cancel, and Back in the dialog also stays."""
+        answer = self.application.dialog.yesnocustom(
+            "Exit Founders Theater", "Are you ready to exit Founders Theater?",
+            customlabel="Quit Kodi", nolabel="Cancel", yeslabel="Exit",
+            defaultbutton=getattr(xbmcgui, "DLG_YESNO_NO_BTN", 10))
+        if answer in (1, 2):
+            self.result = "quit_kodi" if answer == 2 else None
             self.close()
 
     def onClick(self, control_id):

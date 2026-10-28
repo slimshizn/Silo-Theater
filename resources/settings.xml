@@ -270,6 +270,11 @@
           </dependencies>
           <control type="spinner" format="string" />
         </setting>
+        <setting id="confirm_exit" type="boolean" label="32117" help="32118">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle" />
+        </setting>
       </group>
     </category>
   </section>

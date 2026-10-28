@@ -285,6 +285,10 @@ class Application:
                     return
                 server_url = self.client.server_url
                 self._recover_playback()
+            elif action == "quit_kodi":
+                # Chosen in the exit dialog: close Kodi as well as Founders Theater.
+                xbmc.executebuiltin("Quit")
+                return
             else:
                 return
 

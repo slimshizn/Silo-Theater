@@ -33,10 +33,12 @@ DEFAULTS = {
     "open_on_start": False,
     "open_on_any_screen": True,
     "open_delay": 0,
+    # Back on the Home tab asks before leaving Founders Theater (ui_home.confirm_exit).
+    "confirm_exit": True,
 }
 
 BOOLEANS = ("show_plot", "auto_next", "skip_prompts", "player_menu_key", "hide_spoilers", "stop_on_back",
-            "online_tv_themes", "open_on_start", "open_on_any_screen")
+            "online_tv_themes", "open_on_start", "open_on_any_screen", "confirm_exit")
 
 CHOICES = {
     "sign_in_method": ("code", "password"),

@@ -451,11 +451,46 @@ class BackTests(unittest.TestCase):
         self.assertFalse(window.closed)
         self.assertEqual(window.focus, ui_home.slot_ids(0)[3])
 
-    def test_back_from_home_closes_without_result(self):
+    def test_back_from_the_rows_moves_up_to_the_home_tab_first(self):
         window = open_window()
+        window.setFocusId(ui_home.slot_ids(1)[3])
+        window.onAction(Action(BACK))
+        self.assertEqual(window.focus, ui_home.TAB_BUTTONS["home"])
+        self.assertFalse(window.closed)
+        window.application.dialog.yesnocustom.assert_not_called()
+
+    def test_back_on_the_home_tab_asks_before_exiting(self):
+        window = open_window()
+        window.setFocusId(ui_home.TAB_BUTTONS["home"])
+        dialog = window.application.dialog.yesnocustom
+        for answer in (0, -1):  # Cancel, or Back inside the dialog: stay.
+            dialog.return_value = answer
+            window.onAction(Action(BACK))
+            self.assertFalse(window.closed)
+        args, kwargs = dialog.call_args
+        self.assertEqual(args[0], "Exit Founders Theater")
+        self.assertEqual(args[1], "Are you ready to exit Founders Theater?")
+        self.assertEqual((kwargs["customlabel"], kwargs["nolabel"], kwargs["yeslabel"]), ("Quit Kodi", "Cancel", "Exit"))
+        self.assertEqual(kwargs["defaultbutton"], 10)  # Focus starts on Cancel.
+        dialog.return_value = 1
         window.onAction(Action(BACK))
         self.assertTrue(window.closed)
         self.assertIsNone(window.result)
+
+    def test_quit_kodi_closes_with_a_quit_result(self):
+        window = open_window()
+        window.setFocusId(ui_home.TAB_BUTTONS["home"])
+        window.application.dialog.yesnocustom.return_value = 2
+        window.onAction(Action(BACK))
+        self.assertTrue(window.closed)
+        self.assertEqual(window.result, "quit_kodi")
+
+    def test_exit_is_immediate_when_asking_is_turned_off(self):
+        window = open_window(make_application(options={"show_plot": True, "confirm_exit": False}))
+        window.setFocusId(ui_home.TAB_BUTTONS["home"])
+        window.onAction(Action(BACK))
+        self.assertTrue(window.closed)
+        window.application.dialog.yesnocustom.assert_not_called()
 
 
 CONTEXT = 117
