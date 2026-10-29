@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Support Founders Theater, an independent Silo add-on for Kodi, with a Monero donation.">
+    <meta name="theme-color" content="#0c131a">
+    <title>Support Founders Theater</title>
+    <style>
+      :root { color-scheme: dark; --bg: #0c131a; --ink: #f2f4f5; --muted: #9fb0bd; --gold: #e8cf8f; --gold-deep: #b8954a; --line: #24323e; --card: #121c25; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+      body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+        background: radial-gradient(900px 520px at 78% -8%, #e8cf8f1f, transparent 70%), radial-gradient(700px 480px at -10% 30%, #3d6a8a26, transparent 70%); }
+      a { color: var(--gold); text-underline-offset: .22em; }
+      a:hover { color: #fff0c8; }
+      a:focus-visible, button:focus-visible { outline: 3px solid var(--gold); outline-offset: 4px; border-radius: 4px; }
+      .wrap { width: min(1140px, calc(100% - 64px)); margin-inline: auto; }
+      header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-block: 26px; }
+      .brand { display: flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none; font-size: 14px; font-weight: 700; letter-spacing: .18em; }
+      .brand img { width: 34px; height: 34px; border-radius: 9px; }
+      .brand span { color: var(--gold); }
+      header nav a { color: var(--muted); font-size: 14px; text-decoration: none; }
+      header nav a:hover { color: var(--ink); }
+
+      main { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; padding-block: 64px 88px; }
+      .eyebrow { margin: 0 0 20px; color: var(--gold); font-size: 12px; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; }
+      h1 { margin: 0 0 22px; font-size: clamp(36px, 4.6vw, 56px); line-height: 1.06; font-weight: 700; letter-spacing: -.04em; }
+      .intro p { margin: 0 0 14px; color: var(--muted); font-size: 16px; max-width: 34em; }
+
+      .card { padding: 34px; border: 1px solid #e8cf8f3a; border-radius: 22px; background: linear-gradient(160deg, #1b2a33, var(--card) 60%); box-shadow: 0 30px 80px #0007, inset 0 1px 0 #ffffff0d; }
+      .card h2 { margin: 0 0 20px; font-size: 22px; font-weight: 650; letter-spacing: -.02em; }
+      .qr { display: block; width: min(240px, 100%); margin: 0 auto 24px; padding: 10px; border-radius: 14px; background: #fff; }
+      .qr svg { display: block; width: 100%; height: auto; }
+      .label { margin: 0 0 6px; color: var(--muted); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+      .address { display: block; margin: 0; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: #0a1016; color: var(--ink); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; user-select: all; }
+      .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin-top: 16px; }
+      .copy { padding: 10px 18px; border: 0; border-radius: 10px; background: linear-gradient(140deg, var(--gold), var(--gold-deep)); color: #1a1408; font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; }
+      .copy:hover { filter: brightness(1.08); }
+      .status { color: var(--muted); font-size: 13px; }
+      .note { margin: 22px 0 0; color: var(--muted); font-size: 13px; }
+
+      footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 14px 28px; padding-block: 28px 44px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+      footer p { margin: 0; }
+
+      @media (max-width: 980px) { main { grid-template-columns: 1fr; gap: 44px; padding-block: 40px 72px; } }
+      @media (max-width: 640px) { .wrap { width: calc(100% - 32px); } .card { padding: 24px; } .address { font-size: 12.5px; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <a href="./" class="brand" aria-label="Founders Theater home"><img src="zips/script.silo/resources/icon.png" alt="" width="34" height="34"><span>FOUNDERS</span> THEATER</a>
+        <nav aria-label="Links"><a href="https://github.com/slimshizn/Silo-Theater">GitHub ↗</a></nav>
+      </header>
+      <main id="top">
+        <section class="intro" aria-labelledby="title">
+          <p class="eyebrow">Support the add-on</p>
+          <h1 id="title">Support Founders Theater</h1>
+          <p>Founders Theater is free and open source. If you'd like to support its development, you can send a Monero (XMR) donation.</p>
+          <p>Donations support Founders Theater, an independent add-on. They do not go to the Silo project.</p>
+        </section>
+        <section class="card" aria-labelledby="xmr-title">
+          <h2 id="xmr-title">Monero (XMR)</h2>
+          <a class="qr" href="monero:49yvUXVgeURGo7HW2pKc6EVXDb1RZ2CTzT2xxYqweXEGCmjRXhwoE6bHvHYR1pQFE2dfbCU5ffwxoH4krYGTD46N7mAWcE5" aria-label="Open in a Monero wallet"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 45 45" shape-rendering="crispEdges" role="img" aria-label="QR code for the Monero address"><path fill="#fff" d="M0 0h45v45h-45z"/><path stroke="#0c131a" d="M2 2.5h7m4 0h1m1 0h1m3 0h1m2 0h5m1 0h1m2 0h2m1 0h1m1 0h7m-41 1h1m5 0h1m2 0h2m2 0h1m2 0h2m2 0h1m1 0h1m2 0h3m2 0h1m3 0h1m5 0h1m-41 1h1m1 0h3m1 0h1m1 0h1m3 0h1m4 0h3m1 0h2m8 0h1m2 0h1m1 0h3m1 0h1m-41 1h1m1 0h3m1 0h1m1 0h2m1 0h1m2 0h1m1 0h1m5 0h1m3 0h3m3 0h1m1 0h1m1 0h3m1 0h1m-41 1h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1m1 0h2m1 0h1m3 0h4m1 0h1m1 0h1m1 0h3m1 0h1m-41 1h1m5 0h1m1 0h4m5 0h2m1 0h1m1 0h1m2 0h3m2 0h1m3 0h1m5 0h1m-41 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-33 1h1m9 0h1m1 0h3m1 0h1m6 0h1m-32 1h1m1 0h5m8 0h3m2 0h1m1 0h5m1 0h2m2 0h1m1 0h5m-38 1h2m2 0h1m2 0h2m1 0h3m5 0h1m1 0h1m5 0h3m1 0h1m1 0h6m1 0h1m-40 1h1m1 0h1m2 0h1m1 0h2m1 0h4m2 0h1m2 0h2m2 0h1m1 0h2m1 0h2m2 0h3m1 0h1m-38 1h1m1 0h4m3 0h5m2 0h1m2 0h6m2 0h1m2 0h1m1 0h2m1 0h3m1 0h2m-41 1h1m5 0h3m1 0h2m3 0h2m5 0h1m2 0h1m2 0h3m1 0h2m2 0h1m1 0h1m-38 1h1m2 0h1m2 0h1m1 0h1m1 0h1m1 0h1m1 0h2m1 0h1m2 0h2m3 0h1m2 0h1m2 0h1m1 0h4m-36 1h2m1 0h2m1 0h1m1 0h2m2 0h3m10 0h1m2 0h1m2 0h1m2 0h1m1 0h1m-38 1h4m3 0h4m4 0h1m4 0h1m2 0h1m1 0h3m1 0h2m1 0h2m2 0h1m1 0h2m-41 1h1m2 0h2m1 0h6m4 0h3m3 0h1m1 0h6m5 0h1m3 0h2m-41 1h1m2 0h1m1 0h1m1 0h1m1 0h1m10 0h2m3 0h4m2 0h6m3 0h1m-40 1h2m3 0h1m1 0h1m2 0h1m1 0h1m1 0h1m2 0h1m5 0h6m5 0h2m1 0h2m-39 1h1m3 0h1m2 0h2m1 0h5m3 0h1m1 0h3m3 0h1m3 0h3m1 0h3m2 0h1m-41 1h2m2 0h5m1 0h1m4 0h1m2 0h1m2 0h2m2 0h1m2 0h1m3 0h1m3 0h2m1 0h1m-39 1h2m6 0h1m2 0h1m2 0h2m3 0h1m5 0h1m1 0h2m2 0h6m1 0h2m-41 1h1m1 0h2m2 0h3m3 0h1m2 0h2m1 0h1m3 0h1m1 0h4m2 0h1m1 0h1m1 0h2m1 0h2m-39 1h2m1 0h1m4 0h3m1 0h1m1 0h3m1 0h1m2 0h2m1 0h1m1 0h3m5 0h2m1 0h1m1 0h2m-41 1h3m1 0h1m1 0h2m2 0h4m5 0h2m2 0h1m1 0h5m2 0h1m2 0h1m1 0h2m-39 1h2m2 0h2m3 0h1m1 0h1m1 0h3m2 0h1m1 0h3m4 0h2m2 0h1m1 0h1m1 0h6m-40 1h1m1 0h1m1 0h2m4 0h1m1 0h1m2 0h3m3 0h1m2 0h1m1 0h4m5 0h3m-39 1h3m2 0h1m2 0h2m3 0h1m7 0h2m4 0h2m1 0h2m1 0h1m3 0h1m1 0h2m-39 1h3m1 0h2m1 0h2m1 0h2m2 0h2m1 0h1m2 0h1m1 0h5m2 0h2m2 0h2m1 0h1m-39 1h1m3 0h1m3 0h3m3 0h1m1 0h1m1 0h1m2 0h1m4 0h1m3 0h8m1 0h2m-41 1h1m2 0h2m1 0h2m1 0h1m4 0h1m5 0h3m4 0h1m1 0h1m2 0h1m1 0h1m2 0h1m-38 1h1m1 0h2m1 0h1m1 0h4m1 0h3m5 0h2m5 0h2m1 0h2m2 0h4m-38 1h1m2 0h1m2 0h1m3 0h2m1 0h1m1 0h3m4 0h3m1 0h3m2 0h7m2 0h1m-33 1h2m1 0h2m3 0h6m4 0h3m1 0h3m3 0h1m1 0h3m-41 1h7m2 0h2m1 0h1m3 0h2m3 0h2m2 0h3m3 0h2m1 0h1m1 0h1m-37 1h1m5 0h1m1 0h2m3 0h3m1 0h6m1 0h1m1 0h2m2 0h1m1 0h1m3 0h2m2 0h1m-41 1h1m1 0h3m1 0h1m1 0h1m2 0h2m2 0h2m3 0h1m4 0h2m1 0h1m3 0h5m1 0h3m-41 1h1m1 0h3m1 0h1m1 0h1m1 0h2m1 0h6m1 0h4m3 0h2m1 0h2m1 0h1m4 0h3m-41 1h1m1 0h3m1 0h1m1 0h2m1 0h5m4 0h1m1 0h1m1 0h1m1 0h4m1 0h1m2 0h3m-37 1h1m5 0h1m2 0h1m1 0h1m1 0h2m1 0h2m2 0h3m1 0h1m1 0h1m3 0h4m3 0h1m1 0h1m-40 1h7m1 0h1m1 0h2m1 0h4m1 0h1m2 0h3m2 0h3m4 0h3m2 0h1"/></svg></a>
+          <p class="label">Address</p>
+          <code class="address" id="address">49yvUXVgeURGo7HW2pKc6EVXDb1RZ2CTzT2xxYqweXEGCmjRXhwoE6bHvHYR1pQFE2dfbCU5ffwxoH4krYGTD46N7mAWcE5</code>
+          <div class="actions">
+            <button type="button" class="copy" id="copy" hidden>Copy address</button>
+            <span class="status" id="status" role="status" aria-live="polite"></span>
+          </div>
+          <p class="note">Before you send, check that the address in your wallet starts with <strong>49yvUX</strong> and ends with <strong>WcE5</strong>.</p>
+        </section>
+      </main>
+      <footer>
+        <p>Not an official Silo app · AGPL-3.0</p>
+        <a href="./">Back to install</a>
+      </footer>
+    </div>
+    <script>
+      (function () {
+        var button = document.getElementById("copy");
+        var status = document.getElementById("status");
+        if (!navigator.clipboard) return;
+        button.hidden = false;
+        button.addEventListener("click", function () {
+          navigator.clipboard.writeText(document.getElementById("address").textContent.trim()).then(
+            function () { status.textContent = "Copied."; },
+            function () { status.textContent = "Copy failed. Select the address instead."; }
+          );
+        });
+      })();
+    </script>
+  </body>
+</html>
