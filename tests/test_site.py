@@ -95,5 +95,31 @@ class SiteTests(unittest.TestCase):
                 self.assertTrue(destination.hostname)
 
 
+XMR_ADDRESS = "49yvUXVgeURGo7HW2pKc6EVXDb1RZ2CTzT2xxYqweXEGCmjRXhwoE6bHvHYR1pQFE2dfbCU5ffwxoH4krYGTD46N7mAWcE5"
+
+
+class DonatePageTests(unittest.TestCase):
+    def setUp(self):
+        self.html = (PROJECT_ROOT / "site/donate.html").read_text(encoding="utf-8")
+        self.page = SourcePageParser()
+        self.page.feed(self.html)
+
+    def test_address_and_wallet_link_match(self):
+        self.assertEqual(self.html.count(XMR_ADDRESS), 2)
+        self.assertIn({"href": "monero:" + XMR_ADDRESS, "text": ""}, self.page.links)
+
+    def test_says_donations_do_not_go_to_silo(self):
+        self.assertIn("They do not go to the Silo project.", self.html)
+
+    def test_loads_nothing_from_other_sites(self):
+        self.assertEqual([tag for tag, _ in self.page.dependencies], ["script"])
+        self.assertFalse(any(attributes.get("src") for _, attributes in self.page.dependencies))
+
+    def test_landing_page_links_here(self):
+        index = SourcePageParser()
+        index.feed((PROJECT_ROOT / "site/index.html").read_text(encoding="utf-8"))
+        self.assertIn("donate.html", [link["href"] for link in index.links])
+
+
 if __name__ == "__main__":
     unittest.main()

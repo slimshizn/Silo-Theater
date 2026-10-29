@@ -130,6 +130,12 @@ class RepositoryTests(unittest.TestCase):
             build_repository(self.root, self.output)
         self.assertFalse(self.output.exists())
 
+    def test_other_site_pages_are_published_beside_the_landing_page(self):
+        (self.root / "site/donate.html").write_text("<!doctype html><p>Donate</p>\n")
+        paths = build_repository(self.root, self.output)
+        self.assertEqual(paths["pages"], [self.output / "donate.html"])
+        self.assertEqual((self.output / "donate.html").read_bytes(), (self.root / "site/donate.html").read_bytes())
+
 
 
 class WidgetsAddonTests(unittest.TestCase):

@@ -46,6 +46,10 @@
 
 Open Founders Theater and sign in with your server address and Silo account. Updates arrive through the repository. For home screen widgets, also install **Founders Theater Widgets** from the same repository (**Video add-ons**).
 
+## Support Founders Theater
+
+If you'd like to support development, you can [donate in Monero (XMR)](https://slimshizn.github.io/Silo-Theater/donate.html). Donations support Founders Theater, an independent add-on. They do not go to the Silo project.
+
 ## License
 
 [GNU Affero General Public License v3.0 or later](LICENSE).

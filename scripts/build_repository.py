@@ -142,6 +142,14 @@ def build_repository(root: Path = ROOT, output_dir: Optional[Path] = None) -> Di
     if not template.is_file() or template.is_symlink():
         raise ValueError("The website template site/index.html is missing or is a symlink")
     landing_page = template.read_bytes()
+    # Other site pages (such as donate.html) are published beside the landing page.
+    pages = {}
+    for page in sorted((root / "site").glob("*.html")):
+        if page.name == "index.html":
+            continue
+        if not page.is_file() or page.is_symlink():
+            raise ValueError("The website page site/{} is not a regular file".format(page.name))
+        pages[page.name] = page.read_bytes()
     addon = validate_addon(root)
     repository_manifest = validate_repository(root)
     repository_version = repository_manifest.get("version")
@@ -188,6 +196,8 @@ def build_repository(root: Path = ROOT, output_dir: Optional[Path] = None) -> Di
     _write(output / "addons.xml", catalog_bytes)
     _write(output / "addons.xml.md5", checksum)
     _write(output / "index.html", landing_page)
+    for name, contents in pages.items():
+        _write(output / name, contents)
     _write(output / ".nojekyll", b"")
     return {
         "index": output / "addons.xml",
@@ -196,6 +206,7 @@ def build_repository(root: Path = ROOT, output_dir: Optional[Path] = None) -> Di
         "addon_zip": output / "zips" / addon["id"] / addon_name,
         "repository_zip": output / "zips" / REPOSITORY_ID / repository_name,
         "landing_page": output / "index.html",
+        "pages": [output / name for name in pages],
     }
 
 
